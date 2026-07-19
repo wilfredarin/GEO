@@ -1,5 +1,5 @@
 /**
- * Phase 1: Ingestion, Validation, and Triage Engine (Refactored)
+ * Phase 1: Ingestion, Validation, and Triage Engine (Refactored V2)
  * Execution Context: Host Sheet ("POI Verification Control Hub")
  */
 function runPhase1Ingestion() {
@@ -60,7 +60,7 @@ function runPhase1Ingestion() {
   var compHeaders = rawComparison[0];
   var compMap = getHeaderMap(compHeaders);
   
-  // 5. Mapfacts Memory Cache Construction (O(M))
+  // 5. Mapfacts Memory Cache Construction (O(M)) using updated 'poi_fid' mapping
   var mapfactsCache = {};
   for (var i = 1; i < rawMapfacts.length; i++) {
     var row = rawMapfacts[i];
@@ -94,7 +94,7 @@ function runPhase1Ingestion() {
   // 7. Core Comparison Ingestion Pipeline Processing Loop (O(N))
   for (var j = 1; j < rawComparison.length; j++) {
     var cRow = rawComparison[j];
-    var cFid = cRow[compMap["poi_fid"]];
+    var cFid = cRow[compMap["id"]]; // Updated matching column name
     if (!cFid) continue;
     
     // Track ID presence to catch missing downstream leftover items
@@ -103,7 +103,7 @@ function runPhase1Ingestion() {
     var cAiWebsite = cRow[compMap["ai_website"]] || "";
     var cAiAddress = cRow[compMap["ai_address"]] || "";
     var cAiPhone = cRow[compMap["ai_phone"]] || "";
-    var cAiHours = cRow[compMap["ai_operating_hours"]] || "";
+    var cAiHours = cRow[compMap["ai_operatinghours"]] || ""; // Updated matching column name
     var cAiLat = parseFloat(cRow[compMap["ai_lat"]]);
     var cAiLng = parseFloat(cRow[compMap["ai_lng"]]);
     
@@ -127,9 +127,15 @@ function runPhase1Ingestion() {
       continue;
     }
     
-    // Gate 3: Empty AI Payload Data Verification
-    if (!cAiAddress && !cAiPhone && !cAiWebsite && !cAiHours) {
+    // Gate 3a: Empty AI Payload Data Verification (Updated from AND to OR condition)
+    if (!cAiAddress || !cAiPhone || !cAiWebsite || !cAiHours) {
       leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, "Empty AI Payload", "Can't Fix", "", ""]);
+      continue;
+    }
+    
+    // Gate 3b: Missing Coordinate Integrity Scan
+    if (isNaN(cAiLat) || isNaN(cAiLng) || !cAiLat || !cAiLng) {
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, "Missing Coordinates", "Can't Fix", "", ""]);
       continue;
     }
     
@@ -185,20 +191,13 @@ function runPhase1Ingestion() {
 
 /**
  * 10. MODULAR AI PHONE VALIDATION LOGIC ENGINE
- * Customize validation rules for incoming AI suggestions here.
- * Returns true if valid, false if structural mismatch found.
  */
 function isValidAiPhone(aiPhoneString) {
   if (!aiPhoneString) return true;
-  
-  // Strip formatting artifacts to evaluate pure digits
   var digits = aiPhoneString.toString().replace(/[^\d]/g, '');
-  
-  // Structural Length Rule: Standard International Telephone Allocations
   if (digits.length < 10 || digits.length > 15) {
     return false;
   }
-  
   return true;
 }
 
@@ -215,13 +214,13 @@ function getHeaderMap(headers) {
 }
 
 /**
- * Helper: Reset and Initialize Clean Workspace Grids
+ * Helper: Reset and Initialize Clean Workspace Grids (Fixed Range Validation Reset)
  */
 function createOrClearTab(ss, tabName, headers) {
   var sheet = ss.getSheetByName(tabName);
   if (sheet) {
     sheet.clear();
-    sheet.setDataValidation(null);
+    sheet.getDataRange().clearDataValidations(); // Fixed from invalid sheet-level method call
   } else {
     sheet = ss.insertSheet(tabName);
   }
@@ -255,7 +254,7 @@ function writeBugTab(ss, tabName, headers, data) {
 }
 
 /**
- * Helper: Haversine Formula (Calculates distance between coordinates in KM)
+ * Helper: Haversine Formula
  */
 function calculateHaversine(lat1, lng1, lat2, lng2) {
   if (isNaN(lat1) || isNaN(lng1) || isNaN(lat2) || isNaN(lng2)) return NaN;
