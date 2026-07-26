@@ -363,13 +363,15 @@ function overwriteSheetInFile(targetSpreadsheet, targetSheetName, dataArray, ori
 }
 
 function calculationFinalAssignedId(geoId, addressId, distance, scorePct) {
+  if (distance > 10000) {
+    return "No_Match_Found";
+  }
+  
   if (distance >= 2000 && scorePct < 40) {
     return "No_Match_Found";
   }
 
-  if (distance > 10000) {
-    return "No_Match_Found";
-  }
+  
 
   if (geoId === addressId && geoId !== null) {
     return geoId;
@@ -608,7 +610,6 @@ function flagDuplicateMatches(dataArray, idField, distField, strengthField) {
       bestMatches[targetId] = { index: i, distance: distance };
     }
   }
-
   for (let i = 0; i < dataArray.length; i++) {
     let row = dataArray[i];
     let targetId = row[idField];
