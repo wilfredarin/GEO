@@ -99,9 +99,20 @@ def get_address_match_strength(score_pct):
     return "Tier 6: Negligible"
 
 def match_datasets(source_df, target_df, source_id_col, target_id_col):
-    source_clean = source_df.dropna(subset=['lat', 'lng']).copy()
-    target_clean = target_df.dropna(subset=['lat', 'lng']).copy()
+    source_clean = source_df.copy()
+    target_clean = target_df.copy()
     
+    # 1. Force conversion of lat and lng to float (invalid/string values become NaN)
+    source_clean['lat'] = pd.to_numeric(source_clean['lat'], errors='coerce')
+    source_clean['lng'] = pd.to_numeric(source_clean['lng'], errors='coerce')
+    target_clean['lat'] = pd.to_numeric(target_clean['lat'], errors='coerce')
+    target_clean['lng'] = pd.to_numeric(target_clean['lng'], errors='coerce')
+    
+    # # 2. Drop rows where coordinates are NaN or missing
+    # source_clean = source_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
+    # target_clean = target_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
+    
+    # 3. Convert clean float values to Cartesian coordinates
     target_coords = latlon_to_cartesian(target_clean['lat'].values, target_clean['lng'].values)
     source_coords = latlon_to_cartesian(source_clean['lat'].values, source_clean['lng'].values)
     
