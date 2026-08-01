@@ -1,4 +1,3 @@
-// fixed the entire thin working code looks good 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Overlap Finder')
@@ -77,12 +76,12 @@ function matchNearestGeospatialFeatures() {
     
     if (matchObj.closestGeoId) {
       let geoMatch = aiData.find(aiRow => String(aiRow["store_code"]).trim() === String(matchObj.closestGeoId).trim());
-      if (geoMatch) websiteClosestGeo = geoMatch["Website"] || "";
+      if (geoMatch) websiteClosestGeo = geoMatch["website"] || "";
     }
     
     if (matchObj.bestAddressId) {
       let addrMatch = aiData.find(aiRow => String(aiRow["store_code"]).trim() === String(matchObj.bestAddressId).trim());
-      if (addrMatch) websiteClosestAddress = addrMatch["Website"] || "";
+      if (addrMatch) websiteClosestAddress = addrMatch["website"] || "";
     }
 
     mfRow["ai_website_closest_geo"] = websiteClosestGeo;
@@ -126,7 +125,7 @@ function exportCleanQcFile() {
   if (!ckbName) ckbName = "Unnamed_CKB";
   ckbName = ckbName.toLowerCase();
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
-  const reportName = "ckb_mapfafacts_ai_mapping_" + ckbName +"_qc_file";
+  const reportName = "ckb_mapfacts_ai_mapping_" + ckbName +"_qc_file";
   const newReportFile = SpreadsheetApp.create(reportName);
 
   const mapfactsMatchedData = getSheetData(mapfactsMatchedSheet);
@@ -363,22 +362,24 @@ function overwriteSheetInFile(targetSpreadsheet, targetSheetName, dataArray, ori
 }
 
 function calculationFinalAssignedId(geoId, addressId, distance, scorePct) {
-  if (distance > 10000) {
-    return "No_Match_Found";
-  }
-  
   if (distance >= 2000 && scorePct < 40) {
     return "No_Match_Found";
   }
 
-  
+  if (distance > 10000) {
+    return "No_Match_Found";
+  }
 
   if (geoId === addressId && geoId !== null) {
     return geoId;
   }
 
+  // if(distance<=10){
+  //   return geoId;
+  // }
+
   if (distance <= 50) {
-    if (scorePct < 20) return "Human_Review_Needed";
+    if (scorePct < 30) return "Human_Review_Needed";
     return geoId;
   }
 
@@ -412,13 +413,13 @@ function findClosestAndBestAddress(sourceLat, sourceLng, sourceAddress, targetAr
       closestGeoId = target[idColumnName];
     }
     
-    if (distance) {
-      let addressScore = getTokenSimilarity(sourceAddress, target[addressColumnName]);
-      if (addressScore > maxAddressScore) {
-        maxAddressScore = addressScore;
-        bestAddressId = target[idColumnName];
-      }
+  
+    let addressScore = getTokenSimilarity(sourceAddress, target[addressColumnName]);
+    if (addressScore > maxAddressScore) {
+      maxAddressScore = addressScore;
+      bestAddressId = target[idColumnName];
     }
+    
   }
 
   return {
@@ -431,11 +432,13 @@ function findClosestAndBestAddress(sourceLat, sourceLng, sourceAddress, targetAr
 
 function getTokenSimilarity(str1, str2) {
   if (!str1 || !str2) return 0;
+  let str1_normalized =  normalizeAddress(str1);
+  let str2_normalized =  normalizeAddress(str2);
   let clean = function (s) {
     return String(s).toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
   };
-  let tokens1 = clean(str1);
-  let tokens2 = clean(str2);
+  let tokens1 = clean(str1_normalized);
+  let tokens2 = clean(str2_normalized);
   if (tokens1.length === 0 || tokens2.length === 0) return 0;
 
   let intersect = 0;
@@ -610,6 +613,7 @@ function flagDuplicateMatches(dataArray, idField, distField, strengthField) {
       bestMatches[targetId] = { index: i, distance: distance };
     }
   }
+
   for (let i = 0; i < dataArray.length; i++) {
     let row = dataArray[i];
     let targetId = row[idField];
@@ -690,4 +694,37 @@ function writeToNewSheet(sheetName, dataArray) {
     outputMatrix.push(row);
   }
   newSheet.getRange(1, 1, outputMatrix.length, outputMatrix[0].length).setValues(outputMatrix);
+}
+
+
+
+
+
+function normalizeAddress(str) {
+  if (!str) return "";
+  return String(str)
+    .toLowerCase()
+    .replace(/\bi[- ]?(\d+)\b/g, "interstate $1")
+    // Expand common directional abbreviations
+    .replace(/\bn\b/g, "north")
+    .replace(/\bs\b/g, "south")
+    .replace(/\be\b/g, "east")
+    .replace(/\bw\b/g, "west")
+    .replace(/\bne\b/g, "northeast")
+    .replace(/\bnw\b/g, "northwest")
+    .replace(/\bse\b/g, "southeast")
+    .replace(/\bsw\b/g, "southwest")
+    // Expand street types
+    .replace(/\bst\b/g, "street")
+    .replace(/\brd\b/g, "road")
+    .replace(/\bave?\b/g, "avenue")
+    .replace(/\bblvd\b/g, "boulevard")
+    .replace(/\bpkwy\b/g, "parkway")
+    .replace(/\bdr\b/g, "drive")
+    .replace(/\bln\b/g, "lane")
+    .replace(/\bhwy\b/g, "highway")
+    .replace(/\b(united states|usa|us)\b/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
