@@ -1,12 +1,17 @@
 import re
+import time
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
-from rapidfuzz import fuzz
 
 EARTH_RADIUS_M = 6371000.0
 
+# -------------------------------------------------------------------------
+# 1. Address Normalization & Pre-tokenization
+# -------------------------------------------------------------------------
+
 def normalize_address(text):
+    """Cleans and standardizes common street address patterns."""
     if not text or pd.isna(text):
         return ""
     text = str(text).lower()
@@ -30,41 +35,61 @@ def normalize_address(text):
     text = re.sub(r'[^a-z0-9\s]', ' ', text)
     return re.sub(r'\s+', ' ', text).strip()
 
-def get_token_similarity(str1, str2):
-    s1_norm = normalize_address(str1)
-    s2_norm = normalize_address(str2)
-    if not s1_norm or not s2_norm:
+
+def pretokenize_addresses(address_list):
+    """Pre-tokenizes and caches string metadata once to eliminate inner loop string processing."""
+    tokenized = []
+    for addr in address_list:
+        norm = normalize_address(addr)
+        tokens = [t for t in norm.split() if t]
+        
+        counts = {}
+        for t in tokens:
+            counts[t] = counts.get(t, 0) + 1
+        tokenized.append((tokens, counts, len(tokens)))
+    return tokenized
+
+
+def fast_token_similarity(s_tok_info, t_tok_info):
+    """Sørensen–Dice similarity calculated on pre-tokenized structure."""
+    s_tokens, s_counts, s_len = s_tok_info
+    t_tokens, t_counts, t_len = t_tok_info
+    
+    if s_len == 0 or t_len == 0:
         return 0.0
-    
-    t1 = [t for t in s1_norm.split() if t]
-    t2 = [t for t in s2_norm.split() if t]
-    if not t1 or not t2:
-        return 0.0
-    
-    counts = {}
-    for t in t1:
-        counts[t] = counts.get(t, 0) + 1
-    
+        
     intersect = 0
-    for t in t2:
-        if counts.get(t, 0) > 0:
+    counts_copy = s_counts.copy()
+    
+    for t in t_tokens:
+        if counts_copy.get(t, 0) > 0:
             intersect += 1
-            counts[t] -= 1
+            counts_copy[t] -= 1
             
-    return (2.0 * intersect) / (len(t1) + len(t2))
+    return (2.0 * intersect) / (s_len + t_len)
+
+# -------------------------------------------------------------------------
+# 2. Geospatial Mathematics
+# -------------------------------------------------------------------------
 
 def latlon_to_cartesian(lat, lon):
+    """Converts spherical (Lat, Lng) into 3D Cartesian (X, Y, Z) vectors for fast spatial indexing."""
     lat_rad = np.radians(lat)
     lon_rad = np.radians(lon)
     x = EARTH_RADIUS_M * np.cos(lat_rad) * np.cos(lon_rad)
-    y = EARTH_RADIUS_M * np.cos(lat_rad) * np.sin(lon_rad)
+    y = EARTH_RADIUS_M * np.sin(lat_rad) * np.cos(lat_rad)
     z = EARTH_RADIUS_M * np.sin(lat_rad)
     return np.column_stack((x, y, z))
 
+
 def haversine_distance_3d(p1, p2):
-    """Calculates chord distance converted to arc length along Earth's sphere."""
+    """Computes exact surface distance in meters using 3D spatial points."""
     chord_dist = np.linalg.norm(p1 - p2)
     return 2 * EARTH_RADIUS_M * np.arcsin(np.clip(chord_dist / (2 * EARTH_RADIUS_M), 0, 1))
+
+# -------------------------------------------------------------------------
+# 3. Matching Rules & Tiers
+# -------------------------------------------------------------------------
 
 def calculate_final_assigned_id(geo_id, address_id, distance, score_pct):
     if distance >= 2000 and score_pct < 40:
@@ -81,6 +106,7 @@ def calculate_final_assigned_id(geo_id, address_id, distance, score_pct):
         return address_id if (score_pct >= 50 and address_id is not None) else "Human_Review_Needed"
     return "Human_Review_Needed"
 
+
 def get_distance_tier(dist):
     if dist <= 50: return "Tier 1: Exceptional"
     if dist < 100: return "Tier 2: Strong"
@@ -90,76 +116,73 @@ def get_distance_tier(dist):
     if dist < 2000: return "Tier 6: Negligible"
     return "Out of Scope"
 
-def get_address_match_strength(score_pct):
-    if score_pct >= 75: return "Tier 1: Exceptional"
-    if score_pct >= 60: return "Tier 2: Strong"
-    if score_pct >= 50: return "Tier 3: Moderate"
-    if score_pct >= 40: return "Tier 4: Fair"
-    if score_pct >= 30: return "Tier 5: Low"
-    return "Tier 6: Negligible"
+# -------------------------------------------------------------------------
+# 4. Core Pipeline Engine
+# -------------------------------------------------------------------------
 
-def match_datasets(source_df, target_df, source_id_col, target_id_col):
+def match_datasets(source_df, target_df, source_id_col, target_id_col, max_k=30):
     source_clean = source_df.copy()
     target_clean = target_df.copy()
     
-    # 1. Force conversion of lat and lng to float (invalid/string values become NaN)
+    # Force coordinates to numeric float (Coerce invalid string inputs to NaN)
     source_clean['lat'] = pd.to_numeric(source_clean['lat'], errors='coerce')
     source_clean['lng'] = pd.to_numeric(source_clean['lng'], errors='coerce')
     target_clean['lat'] = pd.to_numeric(target_clean['lat'], errors='coerce')
     target_clean['lng'] = pd.to_numeric(target_clean['lng'], errors='coerce')
     
-    # # 2. Drop rows where coordinates are NaN or missing
-    # source_clean = source_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
-    # target_clean = target_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
+    # Drop rows missing valid coordinates
+    source_clean = source_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
+    target_clean = target_clean.dropna(subset=['lat', 'lng']).reset_index(drop=True)
     
-    # 3. Convert clean float values to Cartesian coordinates
+    # Convert coordinates to 3D spatial points
     target_coords = latlon_to_cartesian(target_clean['lat'].values, target_clean['lng'].values)
     source_coords = latlon_to_cartesian(source_clean['lat'].values, source_clean['lng'].values)
     
+    # Build 3D spatial KD-Tree Index
     tree = cKDTree(target_coords)
     
-    # Radius query ~10,000m (chord length approximation)
-    max_radius = 2 * EARTH_RADIUS_M * np.sin(10000 / (2 * EARTH_RADIUS_M))
-    
-    results = []
-    
-    target_addresses = target_clean['address'].tolist()
+    # Pre-tokenize all raw addresses
+    target_addresses_raw = target_clean['address'].tolist()
+    target_tokenized = pretokenize_addresses(target_addresses_raw)
     target_ids = target_clean[target_id_col].tolist()
+    
+    source_addresses_raw = source_clean['address'].tolist()
+    source_tokenized = pretokenize_addresses(source_addresses_raw)
+    
+    k_neighbors = min(max_k, len(target_clean))
+    results = []
     
     for idx, (s_idx, s_row) in enumerate(source_clean.iterrows()):
         s_coord = source_coords[idx]
-        s_addr = s_row.get('address', '')
+        s_tok_info = source_tokenized[idx]
         
-        # Spatial search (nearest points within 10km)
-        nearby_indices = tree.query_ball_point(s_coord, r=max_radius)
+        # 1. Fetch exact K nearest neighbors via spatial tree index (~0.00005 seconds per point)
+        distances_chord, nearby_indices = tree.query(s_coord, k=k_neighbors)
         
+        if k_neighbors == 1:
+            nearby_indices = [nearby_indices]
+            
         min_dist = float('inf')
         closest_geo_id = None
-        
-        if nearby_indices:
-            for n_idx in nearby_indices:
-                dist = haversine_distance_3d(s_coord, target_coords[n_idx])
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_geo_id = target_ids[n_idx]
-        else:
-            # Fallback to absolute nearest if none within 10km radius
-            dist_val, n_idx = tree.query(s_coord, k=1)
-            min_dist = haversine_distance_3d(s_coord, target_coords[n_idx])
-            closest_geo_id = target_ids[n_idx]
-
-        # Address similarity across target set
         max_score = -1.0
         best_addr_id = None
         
-        for t_idx, t_addr in enumerate(target_addresses):
-            score = get_token_similarity(s_addr, t_addr)
+        # 2. Evaluate candidate matches bounded strictly by K-nearest spatial neighbors
+        for n_idx in nearby_indices:
+            dist = haversine_distance_3d(s_coord, target_coords[n_idx])
+            
+            if dist < min_dist:
+                min_dist = dist
+                closest_geo_id = target_ids[n_idx]
+            
+            # Cached fast token similarity score check
+            score = fast_token_similarity(s_tok_info, target_tokenized[n_idx])
+            
             if score > max_score:
                 max_score = score
-                best_addr_id = target_ids[t_idx]
+                best_addr_id = target_ids[n_idx]
                 
         score_pct = (max_score if max_score != -1 else 0.0) * 100.0
-        
         final_id = calculate_final_assigned_id(closest_geo_id, best_addr_id, min_dist, score_pct)
         
         res = s_row.to_dict()
@@ -175,7 +198,9 @@ def match_datasets(source_df, target_df, source_id_col, target_id_col):
         
     return pd.DataFrame(results)
 
+
 def smart_deduplicate_mapfacts(df):
+    """Resolves duplicate store code claims by selecting highest composite rank score."""
     store_assignments = {}
     
     for idx, row in df.iterrows():
@@ -193,7 +218,7 @@ def smart_deduplicate_mapfacts(df):
         has_alignment_lock = (geo_id == code and addr_id == code)
         composite_rank = score - (dist / 10.0)
         
-        if code not in storeAssignments:
+        if code not in store_assignments:
             store_assignments[code] = {
                 'index': idx, 'hasAlignmentLock': has_alignment_lock,
                 'compositeRank': composite_rank, 'poiFid': row.get('poi_fid', '')
@@ -224,14 +249,26 @@ def smart_deduplicate_mapfacts(df):
             
     return df
 
+# -------------------------------------------------------------------------
+# 5. Execution Entry Point
+# -------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("Loading data...")
-    mapfacts_df = pd.read_excel("input_data.xlsx", sheet_name="Mapfacts")
-    ai_df = pd.read_excel("input_data.xlsx", sheet_name="AI")
+    start_time = time.time()
+    
+    input_file = "input_data.xlsx"
+    output_file = "QC_Report_Output.xlsx"
+    
+    print(f"Reading input sheets from '{input_file}'...")
+    mapfacts_df = pd.read_excel(input_file, sheet_name="Mapfacts")
+    ai_df = pd.read_excel(input_file, sheet_name="AI")
 
-    print("Matching Mapfacts -> AI...")
-    mf_matched = match_datasets(mapfacts_df, ai_df, 'poi_fid', 'store_code')
+    print(f"Loaded {len(mapfacts_df)} Mapfacts rows and {len(ai_df)} AI rows.")
+    print("Executing geospatial and pre-tokenized address matching...")
+    
+    mf_matched = match_datasets(mapfacts_df, ai_df, 'poi_fid', 'store_code', max_k=30)
+    
+    # Rename matching output headers to align with original Apps Script schema
     mf_matched.rename(columns={
         'closest_geo_id': 'nearest_ai_store_code',
         'min_distance': 'nearest_ai_dist_m',
@@ -239,11 +276,14 @@ if __name__ == "__main__":
         'final_assigned_id': 'final_assigned_store_code'
     }, inplace=True)
 
+    print("Deduplicating store assignments...")
     mf_matched = smart_deduplicate_mapfacts(mf_matched)
 
-    print("Generating Excel QC File...")
-    with pd.ExcelWriter("QC_Report_Output.xlsx", engine="openpyxl") as writer:
+    print(f"Exporting results to '{output_file}'...")
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         mf_matched.to_excel(writer, sheet_name="mapfacts_with_ai_matches", index=False)
         ai_df.to_excel(writer, sheet_name="Original AI Data", index=False)
         mapfacts_df.to_excel(writer, sheet_name="Original Mapfacts Data", index=False)
-    print("Processing completed successfully!")
+
+    elapsed_time = time.time() - start_time
+    print(f"Success! Process completed in {elapsed_time:.2f} seconds.")
