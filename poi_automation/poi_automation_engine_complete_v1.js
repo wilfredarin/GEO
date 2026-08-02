@@ -146,13 +146,13 @@ function runPhase1Ingestion() {
     // hours mfData.hours
     // Gate 3a: Empty AI Payload Data Verification (OR condition)
     if (!cAiAddress || !cAiPhone || !cAiWebsite || !cAiHours) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.operating_hours, "Empty AI Payload", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.hours, "Empty AI Payload", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 3b: Missing Coordinate Integrity Scan
     if (isNaN(cAiLat) || isNaN(cAiLng) || !cAiLat || !cAiLng) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.operating_hours, "Missing Coordinates", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.hours, "Missing Coordinates", "Pending Review", "", ""]);
       continue;
     }
     
@@ -412,9 +412,12 @@ function runPhase2Reconciliation() {
       if (!loId) continue;
       var loAction = loRow[loMap["qc_action"]];
       
-      if (loAction === "Spam" || loAction === "Duplicate") {
-        finalSpamDuplicates.push([loId, loRow[loMap["mapfacts_address"]], "Left_Over", loAction]);
+      if (loAction === "Spam" || loAction === "Duplicate" ||
+      loAction === "Pending Review" || loAction === "Can't Fix") {
         processedIds[loId] = "dropped";
+        if (loAction === "Spam" || loAction === "Duplicate") {
+          finalSpamDuplicates.push([loId, loRow[loMap["mapfacts_address"]], "Left_Over", loAction]);
+        }
       }
     //  removing this option of found wesbite link everything will be done manually 
       //  else if (loAction === "Found Website Link" && loRow[loMap["qc_discovered_website"]]) {
@@ -434,11 +437,15 @@ function runPhase2Reconciliation() {
       if (!dupId) continue;
       var dupStatus = dupRow[dupMap["qc_status"]];
       
-      if (dupStatus === "Duplicate" || dupStatus === "Spam") {
-        finalSpamDuplicates.push([dupId, dupRow[dupMap["mapfacts_address"]], "Duplicate_Review", dupStatus]);
+      // Duplicate_Review
+      if (dupStatus === "Duplicate" || dupStatus === "Spam" ||
+          dupStatus === "Pending Review" || dupStatus === "Can't Decide") {
         processedIds[dupId] = "dropped";
+        if (dupStatus === "Duplicate" || dupStatus === "Spam") {
+          finalSpamDuplicates.push([dupId, dupRow[dupMap["mapfacts_address"]], "Duplicate_Review", dupStatus]);
+        }
       } else if (dupStatus === "Not Duplicate") {
-        processedIds[dupId] = "evaluate_mismatch"; // Explicit evaluation anchor
+        processedIds[dupId] = "evaluate_mismatch";
       }
     }
   }
@@ -452,35 +459,18 @@ function runPhase2Reconciliation() {
       if (!hrId || processedIds[hrId] === "dropped") continue;
       var hrAction = hrRow[hrMap["qc_action"]];
       
-      if (hrAction === "Spam" || hrAction === "Duplicate") {
-        finalSpamDuplicates.push([hrId, hrRow[hrMap["mapfacts_address"]], "Human_Review", hrAction]);
+      // Human_Review
+      if (hrAction === "Spam" || hrAction === "Duplicate" ||
+          hrAction === "Pending Review" || hrAction === "Can't Fix") {
         processedIds[hrId] = "dropped";
-        continue;
-      }
-      
-      //this will never happen we are manually fixing everythin now so this dropdown is not even there 
-      var fallbackAiWebsite = hrRow[hrMap["fixed_website"]] || "";
-      if (hrAction === "Fixed") {
-        var fixAddr = hrRow[hrMap["fixed_address"]] ? hrRow[hrMap["fixed_address"]].toString().trim() : "";
-        var fixPhon = hrRow[hrMap["fixed_phone"]] ? hrRow[hrMap["fixed_phone"]].toString().trim() : "";
-        var fixWebs = hrRow[hrMap["fixed_website"]] ? hrRow[hrMap["fixed_website"]].toString().trim() : "";
-        var fixHour = hrRow[hrMap["fixed_hours"]] ? hrRow[hrMap["fixed_hours"]].toString().trim() : "";
-        
-        if (fixAddr || fixPhon || fixWebs || fixHour) {
-          if (fixAddr) baseAddressOverrides[hrId] = fixAddr;
-          if (fixPhon) basePhoneOverrides[hrId] = fixPhon;
-          if (fixWebs) baseWebsiteOverrides[hrId] = fixWebs;
-          if (fixHour) baseHoursOverrides[hrId] = fixHour;
-          updateSourceTracker[hrId] = "Human_Review_Fixed";
-          processedIds[hrId] = "human_fixed";
-        } else {
-          processedIds[hrId] = "evaluate_mismatch"; 
+        if (hrAction === "Spam" || hrAction === "Duplicate") {
+          finalSpamDuplicates.push([hrId, hrRow[hrMap["mapfacts_address"]], "Human_Review", hrAction]);
         }
-      } 
-
-      else if (hrAction === "Verified OK") {
+      } else if (hrAction === "Verified OK") {
         processedIds[hrId] = "evaluate_mismatch";
       }
+      
+      var fallbackAiWebsite = hrRow[hrMap["fixed_website"]] || "";
     }
   }
   
