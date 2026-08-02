@@ -488,5 +488,10 @@ def execute_phase_2(qc_spreadsheet_id: str):
 
     print("Phase 2 Reconciliation successfully executed and shipped to QC Workspace!")
 
+
+
+
 HOST_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_HOST_SHEET_ID/edit"
-execute_phase_1(HOST_SHEET_URL)
+# execute_phase_1(HOST_SHEET_URL)
+QC_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_QC_WORKSPACE_SHEET_ID/edit"
+# execute_phase_2(QC_SHEET_URL)
