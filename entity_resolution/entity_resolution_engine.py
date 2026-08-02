@@ -14,6 +14,7 @@ def normalize_address(text):
     """Cleans and standardizes common street address patterns."""
     if not text or pd.isna(text):
         return ""
+    
     text = str(text).lower()
     text = re.sub(r'\bi[- ]?(\d+)\b', r'interstate \1', text)
     
@@ -21,6 +22,7 @@ def normalize_address(text):
         r'\bn\b': 'north', r'\bs\b': 'south', r'\be\b': 'east', r'\bw\b': 'west',
         r'\bne\b': 'northeast', r'\bnw\b': 'northwest', r'\bse\b': 'southeast', r'\bsw\b': 'southwest'
     }
+
     for k, v in directionals.items():
         text = re.sub(k, v, text)
         
@@ -42,7 +44,6 @@ def pretokenize_addresses(address_list):
     for addr in address_list:
         norm = normalize_address(addr)
         tokens = [t for t in norm.split() if t]
-        
         counts = {}
         for t in tokens:
             counts[t] = counts.get(t, 0) + 1
@@ -249,8 +250,95 @@ def smart_deduplicate_mapfacts(df):
             
     return df
 
+    
 # -------------------------------------------------------------------------
-# 5. Execution Entry Point
+# 6. QC Segregation & Tab Generation Logic
+# -------------------------------------------------------------------------
+
+def generate_qc_report(mf_matched_df, ai_raw_df, mapfacts_raw_df, output_filepath):
+    print("Segregating QC tabs (Overlap, Conflict, Human Review, Unmatched)...")
+    
+    # Pre-build AI lookup map for O(1) joins
+    ai_raw_df_clean = ai_raw_df.copy()
+    ai_raw_df_clean['clean_store_code'] = ai_raw_df_clean['store_code'].astype(str).str.strip()
+    ai_lookup = ai_raw_df_clean.set_index('clean_store_code').to_dict('index')
+
+    overlap_rows = []
+    conflict_rows = []
+    human_review_rows = []
+    only_mapfacts_rows = []
+    seen_store_codes = set()
+
+    # 1. Bucket Mapfacts records based on final assignment status
+    for _, row in mf_matched_df.iterrows():
+        code = str(row.get('final_assigned_store_code', '')).strip()
+        row_dict = row.to_dict()
+
+        if code.startswith("Conflict:"):
+            conflict_rows.append(row_dict)
+        elif code == "Human_Review_Needed":
+            human_review_rows.append(row_dict)
+        elif code in ["No_Match_Found", "", "nan"]:
+            only_mapfacts_rows.append(row_dict)
+        else:
+            overlap_rows.append(row_dict)
+            seen_store_codes.add(code)
+
+    # 2. Identify AI stores not matched to any Mapfacts POI
+    only_ai_rows = []
+    for _, ai_row in ai_raw_df.iterrows():
+        ai_code = str(ai_row.get('store_code', '')).strip()
+        if ai_code and ai_code not in seen_store_codes and ai_code != "nan":
+            only_ai_rows.append(ai_row.to_dict())
+
+    overlap_df = pd.DataFrame(overlap_rows)
+    conflict_df = pd.DataFrame(conflict_rows)
+    human_review_df = pd.DataFrame(human_review_rows)
+    only_mapfacts_df = pd.DataFrame(only_mapfacts_rows)
+    only_ai_df = pd.DataFrame(only_ai_rows)
+
+    # 3. Generate comparison_agent_input side-by-side view
+    print("Generating 'comparison_agent_input' tab...")
+    comp_agent_rows = []
+    for row in overlap_rows:
+        matched_code = str(row.get('final_assigned_store_code', '')).strip()
+        matched_ai = ai_lookup.get(matched_code, {})
+
+        comp_agent_rows.append({
+            "poi_fid": row.get("poi_fid", ""),
+            "address": row.get("address", ""),
+            "phone": row.get("phone", row.get("Phone", "")),
+            "website": row.get("website", row.get("Website", "")),
+            "operating_hours": row.get("operating_hours", row.get("opening_hours", "")),
+            "lat": row.get("lat", ""),
+            "lng": row.get("lng", ""),
+            "ai_store_code": matched_ai.get("store_code", ""),
+            "ai_address": matched_ai.get("address", ""),
+            "ai_website": matched_ai.get("Website", matched_ai.get("website", "")),
+            "ai_operating_hours": matched_ai.get("operating_hours", matched_ai.get("opening_hours", "")),
+            "ai_phone": matched_ai.get("Phone", matched_ai.get("phone", ""))
+        })
+
+    comparison_agent_df = pd.DataFrame(comp_agent_rows)
+
+    # 4. Write all structured sheets into final Excel workbook
+    print(f"Saving workbook to '{output_filepath}'...")
+    with pd.ExcelWriter(output_filepath, engine="openpyxl") as writer:
+        overlap_df.to_excel(writer, sheet_name="Overlap", index=False)
+        human_review_df.to_excel(writer, sheet_name="Human Review Needed", index=False)
+        conflict_df.to_excel(writer, sheet_name="Duplicate Conflicts", index=False)
+        only_mapfacts_df.to_excel(writer, sheet_name="Only Mapfacts", index=False)
+        only_ai_df.to_excel(writer, sheet_name="Only AI", index=False)
+        comparison_agent_df.to_excel(writer, sheet_name="comparison_agent_input", index=False)
+        
+        # Raw Data Copies
+        mf_matched_df.to_excel(writer, sheet_name="mapfacts_with_ai_matches", index=False)
+        ai_raw_df.to_excel(writer, sheet_name="Original AI Data", index=False)
+        mapfacts_raw_df.to_excel(writer, sheet_name="Original Mapfacts Data", index=False)
+
+
+# -------------------------------------------------------------------------
+# 7. Execution Entry Point
 # -------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -259,16 +347,16 @@ if __name__ == "__main__":
     input_file = "input_data.xlsx"
     output_file = "QC_Report_Output.xlsx"
     
-    print(f"Reading input sheets from '{input_file}'...")
+    print(f"Reading sheets from '{input_file}'...")
     mapfacts_df = pd.read_excel(input_file, sheet_name="Mapfacts")
     ai_df = pd.read_excel(input_file, sheet_name="AI")
 
     print(f"Loaded {len(mapfacts_df)} Mapfacts rows and {len(ai_df)} AI rows.")
-    print("Executing geospatial and pre-tokenized address matching...")
+    print("Matching datasets using spatial K-NN + pre-tokenization...")
     
     mf_matched = match_datasets(mapfacts_df, ai_df, 'poi_fid', 'store_code', max_k=30)
     
-    # Rename matching output headers to align with original Apps Script schema
+    # Rename matching output headers to align with Apps Script schema
     mf_matched.rename(columns={
         'closest_geo_id': 'nearest_ai_store_code',
         'min_distance': 'nearest_ai_dist_m',
@@ -276,14 +364,11 @@ if __name__ == "__main__":
         'final_assigned_id': 'final_assigned_store_code'
     }, inplace=True)
 
-    print("Deduplicating store assignments...")
+    print("Resolving duplicate store assignments...")
     mf_matched = smart_deduplicate_mapfacts(mf_matched)
 
-    print(f"Exporting results to '{output_file}'...")
-    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        mf_matched.to_excel(writer, sheet_name="mapfacts_with_ai_matches", index=False)
-        ai_df.to_excel(writer, sheet_name="Original AI Data", index=False)
-        mapfacts_df.to_excel(writer, sheet_name="Original Mapfacts Data", index=False)
+    # Build full multi-tab QC file including comparison_agent_input
+    generate_qc_report(mf_matched, ai_df, mapfacts_df, output_file)
 
     elapsed_time = time.time() - start_time
-    print(f"Success! Process completed in {elapsed_time:.2f} seconds.")
+    print(f"\n✨ Success! Complete pipeline finished in {elapsed_time:.2f} seconds.")

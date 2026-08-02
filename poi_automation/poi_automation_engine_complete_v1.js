@@ -132,7 +132,7 @@ function runPhase1Ingestion() {
     
     // Gate 1: AI Hallucination Check
     if (!mapfactsCache[cFid]) {
-      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone,  cAiWebsite, "AI Hallucinated ID", 0, "Pending Review", "", "", "", ""]);
+      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone,  cAiWebsite, "AI Hallucinated ID", 0, "Pending Review"]);
       continue;
     }
     
@@ -143,29 +143,29 @@ function runPhase1Ingestion() {
       duplicateRows.push([cFid, mfData.address, cAiAddress, mfData.website, cAiWebsite, mfData.nbr_cnt, "Duplicate"]);
       continue;
     }
-    
+    // hours mfData.hours
     // Gate 3a: Empty AI Payload Data Verification (OR condition)
     if (!cAiAddress || !cAiPhone || !cAiWebsite || !cAiHours) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, "Empty AI Payload", "Can't Fix", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.operating_hours, "Empty AI Payload", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 3b: Missing Coordinate Integrity Scan
     if (isNaN(cAiLat) || isNaN(cAiLng) || !cAiLat || !cAiLng) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, "Missing Coordinates", "Can't Fix", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.operating_hours, "Missing Coordinates", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 4: Geospatial Displacement Check
     var drift = calculateHaversine(mfData.lat, mfData.lng, cAiLat, cAiLng);
     if (!isNaN(drift) && drift > 1.0) {
-      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone,cAiWebsite, "Distance Drift > 1km", drift, "Pending Review", "", "", "", ""]);
+      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone,cAiWebsite, "Distance Drift > 1km", drift, "Pending Review"]);
       continue;
     }
     
     // Gate 5: Proposed AI Phone Target Structure Validation
     if (cAiPhone && !isValidAiPhone(cAiPhone)) {
-      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, "Invalid Proposed AI Phone", drift || 0, "Pending Review", "", "", "", ""]);
+      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, "Invalid Proposed AI Phone", drift || 0, "Pending Review"]);
       continue;
     }
     
@@ -189,14 +189,14 @@ function runPhase1Ingestion() {
     var checkFid = rawMapfacts[k][mfMap["poi_fid"]];
     if (checkFid && !idsPresentInComparison[checkFid]) {
       var unassignedMf = mapfactsCache[checkFid];
-      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone, "Missing from Scraper Output", "Can't Fix", "", ""]);
+      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone,unassignedMf.hours, "Missing from Scraper Output", "Pending Review", "", ""]);
     }
   }
   
   // 9. Render Destination Operations Tabs and Setup UI Component Controls
-  writeTriageTab(ss, "Left_Over", ["ID", "Mapfacts_Address", "Mapfacts_Website", "Mapfacts_Phone", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 6, ["Found Website Link", "Duplicate", "Spam", "Can't Fix"]);
-  writeTriageTab(ss, "Human_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Phone", "AI_Phone", "AI_Website", "Validation_Failure_Reason", "Calculated_Drift_KM", "QC_Action", "Fixed_Address", "Fixed_Phone", "Fixed_Website", "Fixed_Hours"], humanReviewRows, 9, ["Pending Review", "Verified OK", "Fixed", "Spam", "Duplicate", "Can't Fix"]);
-  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "QC_Status"], duplicateRows, 7, ["Duplicate", "Not Duplicate", "Can't Decide"]);
+  writeTriageTab(ss, "Left_Over", ["ID", "Address", "Website", "Phone","operating_hours", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 7, ["Found Website Link", "Duplicate", "Spam", "Can't Fix","Fixed Manual Tab","Pending Review"]);
+  writeTriageTab(ss, "Human_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Phone", "AI_Phone", "AI_Website", "Validation_Failure_Reason", "Calculated_Drift_KM", "QC_Action"], humanReviewRows, 9, ["Pending Review", "Verified OK", "Fixed Manual Tab", "Spam", "Duplicate", "Can't Fix"]);
+  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "QC_Status"], duplicateRows, 7, ["Duplicate", "Not Duplicate", "Can't Decide","Pending Review"]);
   
   writeBugTab(ss, "Bugs_Address", ["ID", "AI_Website", "Address", "AI_Address", "raise_bug"], bugsAddress);
   writeBugTab(ss, "Bugs_Phone", ["ID", "AI_Website", "Address", "Mapfacts_Phone", "AI_Phone", "raise_bug"], bugsPhone);
@@ -204,7 +204,7 @@ function runPhase1Ingestion() {
   writeBugTab(ss, "Bugs_Website", ["ID", "AI_Website", "Address", "Mapfacts_Website", "raise_bug"], bugsWebsite);
   
   // 9b. Build the structural layout for Manual_Bug_Tab
-  var manualHeaders = ["ID", "Address", "AI_Address", "Phone", "AI_Phone", "Website", "AI_Website", "Operating_Hours", "AI_Operating_Hours", "Address_Result", "Phone_Result", "Website_Result", "Hours_Result"];
+  var manualHeaders = ["ID","Address", "Website", "Phone","Operating_Hours", "AI_Address", "AI_Phone", "AI_Website", "AI_Operating_Hours", "Address_Result", "Phone_Result", "Website_Result", "Hours_Result"];
   var manualSheet = createOrClearTab(ss, "Manual_Bug_Tab", manualHeaders);
   
   // Inject explicit dropdowns to the manual result logic columns (Rows 2 to 500)
@@ -415,11 +415,13 @@ function runPhase2Reconciliation() {
       if (loAction === "Spam" || loAction === "Duplicate") {
         finalSpamDuplicates.push([loId, loRow[loMap["mapfacts_address"]], "Left_Over", loAction]);
         processedIds[loId] = "dropped";
-      } else if (loAction === "Found Website Link" && loRow[loMap["qc_discovered_website"]]) {
-        var discoveredUrl = loRow[loMap["qc_discovered_website"]].toString().trim();
-        reRunQueue.push([loId, discoveredUrl, "website", discoveredUrl]);
-        processedIds[loId] = "rerun";
       }
+    //  removing this option of found wesbite link everything will be done manually 
+      //  else if (loAction === "Found Website Link" && loRow[loMap["qc_discovered_website"]]) {
+      //   var discoveredUrl = loRow[loMap["qc_discovered_website"]].toString().trim();
+      //   reRunQueue.push([loId, discoveredUrl, "website", discoveredUrl]);
+      //   processedIds[loId] = "rerun";
+      // }
     }
   }
   
@@ -456,6 +458,7 @@ function runPhase2Reconciliation() {
         continue;
       }
       
+      //this will never happen we are manually fixing everythin now so this dropdown is not even there 
       var fallbackAiWebsite = hrRow[hrMap["fixed_website"]] || "";
       if (hrAction === "Fixed") {
         var fixAddr = hrRow[hrMap["fixed_address"]] ? hrRow[hrMap["fixed_address"]].toString().trim() : "";
@@ -473,7 +476,9 @@ function runPhase2Reconciliation() {
         } else {
           processedIds[hrId] = "evaluate_mismatch"; 
         }
-      } else if (hrAction === "Verified OK") {
+      } 
+
+      else if (hrAction === "Verified OK") {
         processedIds[hrId] = "evaluate_mismatch";
       }
     }
@@ -537,7 +542,7 @@ function runPhase2Reconciliation() {
       var mbRow = remoteManualBug[m];
       var mbId = mbRow[mbMap["id"]];
       
-      if (!mbId || processedIds[mbId] === "dropped" || processedIds[mbId] === "rerun") continue;
+      if (!mbId || processedIds[mbId] === "dropped") continue;
       
       var currentAiWebsite = mbRow[mbMap["ai_website"]] ? mbRow[mbMap["ai_website"]].toString().trim() : "";
       evidenceSourceTracker[mbId] = currentAiWebsite;
