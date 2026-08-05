@@ -1,4 +1,4 @@
-**
+/**
  * ============================================================================
  * CUSTOM UI MENU INITIALIZATION
  * ============================================================================
@@ -136,7 +136,7 @@ function runPhase1Ingestion() {
     
     // Gate 1: AI Hallucination Check
     if (!mapfactsCache[cFid]) {
-      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone, cAiWebsite, "AI Hallucinated ID", 0, "Pending Review"]);
+      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone, cAiWebsite, "AI Hallucinated ID", 0,"","","","", "Pending Review"]);
       continue;
     }
     
