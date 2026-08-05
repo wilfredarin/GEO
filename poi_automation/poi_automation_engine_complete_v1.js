@@ -553,7 +553,7 @@ function runPhase2Reconciliation() {
     var mfWebs = snapRow[snapMap["website"]] || "";
     var mfHour = snapRow[snapMap["operating_hours"]] || "";
     var mfIsClaimed = snapRow[snapMap["is_claimed"]] || "";
-    var mfIsChainCorrect = snapRow[snapMap["is_chain_correct"]] || "";
+    var mfIsChainCorrect = snapRow[snapMap["is_chain_correct"]] || "FALSE";
     var mfChainName = snapRow[snapMap["chain_name"]] || "";
     // ROUTE TO NON_GOLDEN_DATA IF DROPPED
     if (processedIds[sId] === "dropped") {
