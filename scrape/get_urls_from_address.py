@@ -13,13 +13,14 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ==========================================
 # CONFIGURATION
 # ==========================================
-INPUT_FILE_PATH = os.path.join("Data", "input_stores.xlsx")  # Input Excel file
-OUTPUT_FILE_PATH = os.path.join("Data", "output.csv")  # Output CSV file
+# Look for input and output inside the ../Data/ directory
+INPUT_FILE_PATH = os.path.join("..", "Data", "input_stores.xlsx")
+OUTPUT_FILE_PATH = os.path.join("..", "Data", "output.csv")
 
 # Column names in your input Excel file
 COL_STORE_CODE = "store_code"
 COL_ADDRESS = "address"
-COL_KEYWORD = "keyword"  # Optional: e.g. "Starbucks", "Walmart", etc. Leave blank or remove logic if not using
+COL_KEYWORD = "keyword"  # Optional: e.g. "Starbucks", "Kroger", "Walmart"
 
 # Row processing configuration (0-indexed)
 # Set START_ROW = None to start from the beginning
@@ -53,7 +54,10 @@ def create_driver():
 # GOOGLE MAPS EXTRACTION LOGIC
 # ==========================================
 def extract_maps_url(driver, address, keyword=None):
-  """Searches Google Maps for an address and returns the resulting POI URL."""
+  """Searches Google Maps for an address and returns the resulting POI URL,
+
+  handling direct POI page opens, URL redirects, and list selection.
+  """
   search_query = (
       f"{keyword} {address}".strip() if keyword else str(address).strip()
   )
@@ -63,14 +67,32 @@ def extract_maps_url(driver, address, keyword=None):
 
   try:
     driver.get(search_url)
-    wait = WebDriverWait(driver, 6)
-    time.sleep(2)  # Wait for initial page redirects
+    wait = WebDriverWait(driver, 8)
 
-    # Case 1: Google Maps redirected directly to an exact POI page
-    if "/maps/place/" in driver.current_url:
-      return driver.current_url
+    # 1. WAIT FOR URL REDIRECT (Up to 5 seconds)
+    # Check repeatedly if Google Maps rewritten the URL to a specific POI (/maps/place/ or featuring a CID)
+    for _ in range(10):
+      current_url = driver.current_url
+      if "/maps/place/" in current_url or "!1s" in current_url:
+        return current_url
+      time.sleep(0.5)
 
-    # Case 2: Multiple candidate results in left sidebar -> click the first matching result
+    # 2. CHECK IF A SINGLE POI PANEL IS ALREADY OPEN (Main Heading h1)
+    # Sometimes the detail panel opens directly but the URL hasn't updated yet
+    try:
+      heading_element = driver.find_element(
+          By.CSS_SELECTOR, "h1.DUwif, h1.fontHeadlineLarge"
+      )
+      heading_text = heading_element.text or ""
+
+      if not keyword or keyword.lower() in heading_text.lower():
+        # Give Google 1.5 extra seconds to finish updating the URL bar
+        time.sleep(1.5)
+        return driver.current_url
+    except Exception:
+      pass  # Heading not found, proceed to list check
+
+    # 3. CASE: MULTIPLE CANDIDATE POIs IN SIDEBAR LIST
     poi_elements = wait.until(
         EC.presence_of_all_elements_located(
             (By.CSS_SELECTOR, "a.hfGl2c, div.Nv2PK a")
@@ -82,16 +104,22 @@ def extract_maps_url(driver, address, keyword=None):
         aria_label = elem.get_attribute("aria-label") or ""
         elem_text = elem.text or ""
 
-        # If keyword is provided, ensure it matches before clicking
+        # Check if keyword matches
         if not keyword or (
             keyword.lower() in aria_label.lower()
             or keyword.lower() in elem_text.lower()
         ):
           driver.execute_script("arguments[0].click();", elem)
-          time.sleep(2.5)  # Wait for URL to update
+
+          # Wait for click to update the URL to /maps/place/
+          for _ in range(10):
+            time.sleep(0.5)
+            if "/maps/place/" in driver.current_url:
+              return driver.current_url
+
           return driver.current_url
 
-      # Fallback to clicking the very first result if keyword match wasn't strict
+      # Fallback: Click first POI in list if no explicit keyword match was found
       driver.execute_script("arguments[0].click();", poi_elements[0])
       time.sleep(2.5)
       return driver.current_url
@@ -106,8 +134,11 @@ def extract_maps_url(driver, address, keyword=None):
 # HELPER FOR SAVING TO CSV
 # ==========================================
 def save_output(df):
-  """Saves the output DataFrame to Data/output.csv."""
-  os.makedirs("Data", exist_ok=True)
+  """Saves the output DataFrame to ../Data/output.csv."""
+  output_dir = os.path.dirname(OUTPUT_FILE_PATH)
+  if output_dir:
+    os.makedirs(output_dir, exist_ok=True)
+
   df.to_csv(OUTPUT_FILE_PATH, index=False)
   print(f"\n[✓] Progress saved to {OUTPUT_FILE_PATH}\n")
 
@@ -119,7 +150,7 @@ def main():
   if not os.path.exists(INPUT_FILE_PATH):
     raise FileNotFoundError(
         f"Input file '{INPUT_FILE_PATH}' not found. Please ensure it exists"
-        " inside the 'Data' folder."
+        " inside the '../Data' folder."
     )
 
   print(f"Reading input file: {INPUT_FILE_PATH}")
