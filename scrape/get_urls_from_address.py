@@ -1,148 +1,191 @@
+import os
 import re
 import time
 import urllib.parse
-import gspread
-from google.oauth2.service_account import Credentials
+from colabtools import sheets
+import pandas as pd
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
 
-# ==========================================
-# 1. CONFIGURATION
-# ==========================================
-SHEET_NAME = "Maps Matching Data"  # Name of your Google Sheet
-INPUT_COL_ADDRESS = 1  # Column A: Address
-INPUT_COL_KEYWORD = 2  # Column B: Target Keyword (e.g., Starbucks, Walmart)
-OUTPUT_COL_URL = 3  # Column C: Extracted Google Maps URL
-OUTPUT_COL_MATCH = 4  # Column D: Matched POI Name
+# =====================================================================
+# CONFIGURATION
+# =====================================================================
+INPUT_SPREADSHEET_ID = "YOUR_SPREADSHEET_ID_HERE"
+WORKSHEET_NAME = "Sheet1"  # Change to your worksheet name
 
-# Google Sheets API Auth
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
-client = gspread.authorize(creds)
-sheet = client.open(SHEET_NAME).sheet1
+# Column names in your Google Sheet
+COL_ADDRESS = "Address"
+COL_KEYWORD = "Keyword"
+COL_RESULT_URL = "Extracted_URL"
+COL_RESULT_MATCH = "Matched_POI_Name"
 
 
-# ==========================================
-# 2. SELENIUM BROWSER SETUP
-# ==========================================
-def create_driver():
-    chrome_options = Options()
-    # Uncomment next line to run headless (without opening visible browser windows)
-    # chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# =====================================================================
+# GOOGLE SHEETS HELPER FUNCTIONS
+# =====================================================================
+def read_sheet_by_name(
+    spreadsheet_id: str, worksheet_name: str
+) -> pd.DataFrame:
+  """Reads a worksheet from a Google Sheet into a Pandas DataFrame."""
+  worksheets = sheets.get_worksheets(spreadsheet_id)
+  matching = worksheets[worksheets['Title'] == worksheet_name]
+  if matching.empty:
+    raise ValueError(
+        f"Worksheet '{worksheet_name}' not found in spreadsheet"
+        f" {spreadsheet_id}"
     )
 
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=chrome_options)
+  worksheet_id = matching['Worksheet Id'].iloc[0]
+  return sheets.get_cells(spreadsheet_id, worksheet_id, has_col_header=True)
 
 
-# ==========================================
-# 3. SCRAPING & MATCHING LOGIC
-# ==========================================
-def search_and_extract(driver, address, keyword):
-    """Searches Google Maps for an address, checks results for keyword,
+def write_sheet_by_name(
+    spreadsheet_id: str, worksheet_name: str, df: pd.DataFrame
+):
+  """Writes a Pandas DataFrame to a worksheet, creating it if it doesn't exist."""
+  worksheets = sheets.get_worksheets(spreadsheet_id)
+  matching = worksheets[worksheets['Title'] == worksheet_name]
 
-    and returns the matching POI name and its full URL.
-    """
-    search_url = (
-        f"https://www.google.com/maps/search/{urllib.parse.quote(address)}"
-    )
-    driver.get(search_url)
+  if not matching.empty:
+    worksheet_id = matching['Worksheet Id'].iloc[0]
+  else:
+    worksheet_id = sheets.add_worksheet(spreadsheet_id, worksheet_name)
 
-    wait = WebDriverWait(driver, 8)
+  sheets.update_cells(spreadsheet_id, worksheet_id, df, include_col_header=True)
 
-    try:
-        # Case A: Google Maps directly redirected to a single exact POI page
-        time.sleep(2)  # Allow page JS and URL redirect to settle
-        current_url = driver.current_url
 
-        # Check if the title or page text matches the keyword
-        page_title = driver.title.lower()
-        if keyword.lower() in page_title:
-            return driver.title, current_url
+# =====================================================================
+# COLAB SELENIUM DRIVER SETUP
+# =====================================================================
+def create_colab_driver():
+  """Installs and configures a headless Chrome browser in Google Colab."""
+  # Ensure chromium and driver dependencies exist in Colab environment
+  os.system(
+      'apt-get update && apt-get install -y chromium-chromedriver'
+      ' chromium-browser > /dev/null 2>&1'
+  )
 
-        # Case B: Google Maps shows a list of multiple candidate POIs on the left panel
-        poi_elements = wait.until(
-            EC.presence_of_all_elements_located(
-                (By.CSS_SELECTOR, "a.hfGl2c, div.Nv2PK a")
-            )
+  chrome_options = Options()
+  chrome_options.add_argument('--headless')
+  chrome_options.add_argument('--no-sandbox')
+  chrome_options.add_argument('--disable-dev-shm-usage')
+  chrome_options.add_argument('--disable-gpu')
+  chrome_options.add_argument(
+      'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      ' (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  )
+
+  service = Service('/usr/bin/chromedriver')
+  return webdriver.Chrome(service=service, options=chrome_options)
+
+
+# =====================================================================
+# GOOGLE MAPS SCRAPING & MATCHING LOGIC
+# =====================================================================
+def search_and_extract(driver, address: str, keyword: str):
+  """Searches Google Maps for an address, finds the matching POI, and returns its name and full URL."""
+  search_url = (
+      f'https://www.google.com/maps/search/{urllib.parse.quote(address)}'
+  )
+  driver.get(search_url)
+
+  wait = WebDriverWait(driver, 6)
+
+  try:
+    time.sleep(2)  # Allow page JS and URL redirects to resolve
+    current_url = driver.current_url
+
+    # Case 1: Google Maps directly opened a single exact match page
+    if keyword.lower() in driver.title.lower():
+      return driver.title, current_url
+
+    # Case 2: Google Maps returned a list of multiple candidate POIs on the left panel
+    poi_elements = wait.until(
+        EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, 'a.hfGl2c, div.Nv2PK a')
         )
+    )
 
-        for element in poi_elements:
-            aria_label = element.get_attribute("aria-label") or ""
-            element_text = element.text or ""
+    for element in poi_elements:
+      aria_label = element.get_attribute('aria-label') or ''
+      element_text = element.text or ''
 
-            # Check if the target keyword is in the result name/label
-            if (
-                keyword.lower() in aria_label.lower()
-                or keyword.lower() in element_text.lower()
-            ):
-                # Click the matching POI to load its detailed URL
-                driver.execute_script("arguments[0].click();", element)
-                time.sleep(2.5)  # Wait for URL to update with POI details
-                return aria_label or element_text, driver.current_url
+      # Check if target keyword matches the candidate POI title/label
+      if (
+          keyword.lower() in aria_label.lower()
+          or keyword.lower() in element_text.lower()
+      ):
+        # Trigger JS click to open the POI detail panel and update the URL
+        driver.execute_script('arguments[0].click();', element)
+        time.sleep(2.5)  # Wait for URL to update with place details
+        matched_title = aria_label or element_text
+        return matched_title.strip(), driver.current_url
 
-    except Exception as e:
-        print(f"  [!] Error processing '{address}': {e}")
+  except Exception as e:
+    print(f"  [!] Error matching '{address}': {e}")
 
-    return "No Match Found", ""
+  return 'No Match Found', ''
 
 
-# ==========================================
-# 4. MAIN EXECUTION LOOP
-# ==========================================
+# =====================================================================
+# MAIN PIPELINE
+# =====================================================================
 def main():
-    driver = create_driver()
-    rows = sheet.get_all_values()
+  print('1. Fetching DataFrame from Google Sheet...')
+  df = read_sheet_by_name(INPUT_SPREADSHEET_ID, WORKSHEET_NAME)
 
-    print(f"Found {len(rows) - 1} rows to process.\n")
+  # Ensure target output columns exist in DataFrame
+  if COL_RESULT_URL not in df.columns:
+    df[COL_RESULT_URL] = ''
+  if COL_RESULT_MATCH not in df.columns:
+    df[COL_RESULT_MATCH] = ''
 
-    # Iterate through rows (skipping header at row index 0)
-    for index, row in enumerate(rows[1:], start=2):
-        if len(row) < 2:
-            continue
+  print('2. Initializing Headless Chrome in Colab...')
+  driver = create_colab_driver()
 
-        address = row[0].strip()
-        keyword = row[1].strip()
+  print(f'3. Processing {len(df)} rows...\n')
 
-        # Skip if address or keyword is missing, or if already processed
-        if not address or not keyword:
-            continue
-        if len(row) >= OUTPUT_COL_URL and row[OUTPUT_COL_URL - 1].strip():
-            print(f"Row {index}: Already processed ({address}). Skipping.")
-            continue
+  try:
+    for idx, row in df.iterrows():
+      address = str(row.get(COL_ADDRESS, '')).strip()
+      keyword = str(row.get(COL_KEYWORD, '')).strip()
 
-        print(
-            f"Processing Row {index}: Address='{address}' | Keyword='{keyword}'"
-        )
+      # Skip if address or keyword is missing
+      if not address or not keyword or address.lower() == 'nan':
+        continue
 
-        matched_name, poi_url = search_and_extract(driver, address, keyword)
+      # Skip if this row has already been processed
+      if pd.notna(row.get(COL_RESULT_URL)) and str(
+          row.get(COL_RESULT_URL)
+      ).strip():
+        print(f"Row {idx + 1}: Already completed. Skipping.")
+        continue
 
-        # Update Google Sheet immediately for each processed row
-        sheet.update_cell(index, OUTPUT_COL_URL, poi_url)
-        sheet.update_cell(index, OUTPUT_COL_MATCH, matched_name)
+      print(
+          f"Processing Row {idx + 1}/{len(df)}: Address='{address}' |"
+          f" Keyword='{keyword}'"
+      )
 
-        print(f"  -> Result: {matched_name}")
-        print(f"  -> URL: {poi_url}\n")
+      matched_name, poi_url = search_and_extract(driver, address, keyword)
 
-        time.sleep(1)  
+      # Update Pandas DataFrame in memory
+      df.at[idx, COL_RESULT_MATCH] = matched_name
+      df.at[idx, COL_RESULT_URL] = poi_url
 
+      print(f"  -> Matched: {matched_name}")
+      print(f"  -> URL: {poi_url}\n")
+
+  finally:
     driver.quit()
-    print("Task completed successfully!")
+
+  print('4. Writing updated DataFrame back to Google Sheet...')
+  write_sheet_by_name(INPUT_SPREADSHEET_ID, WORKSHEET_NAME, df)
+  print('Done! Google Sheet successfully updated.')
 
 
-if __name__ == "__main__":
-    main()
+# Execute
+main()
