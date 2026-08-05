@@ -94,7 +94,7 @@ function runPhase1Ingestion() {
         lng: parseFloat(row[mfMap["lng"]]),
         nbr_cnt: parseInt(row[mfMap["nbr_count"]], 10) || 0,
         is_claimed: row[mfMap["is_claimed"]] === "TRUE",
-        poi_bucket: row[mfMap["POI_BUCKET"]] || "",
+        poi_bucket: row[mfMap["poi_bucket"]] || "",
         failure_reasons: row[mfMap["failure_reasons"]] || "",
         maps_link: row[mfMap["maps_link"]] || "",
         rawRow: row
