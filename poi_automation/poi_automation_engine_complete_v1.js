@@ -251,23 +251,47 @@ function exportWorkspaceToQC() {
       }
     }
     
+   
+    
+    // var currentFile = DriveApp.getFileById(currentSs.getId());
+    // var clonedFile = currentFile.makeCopy(clonedName);
+    // var clonedSs = SpreadsheetApp.openById(clonedFile.getId());
+    
+
+    // removing appscript code from the cloned file to avoid accidental execution by QC team
+    // -------------------------------------------------------------
     var clonedName = "CKB " + (tabName || "Workspace") + " Bug File";
+
     
-    var currentFile = DriveApp.getFileById(currentSs.getId());
-    var clonedFile = currentFile.makeCopy(clonedName);
-    var clonedSs = SpreadsheetApp.openById(clonedFile.getId());
-    
+    var clonedSs = SpreadsheetApp.create(clonedName);
+    var clonedFile = DriveApp.getFileById(clonedSs.getId());
+
+    // Copy all sheets from host to the new spreadsheet (excluding internal Config/Prompts)
     var internalMasterTabs = ["Config", "Prompts"];
-    internalMasterTabs.forEach(function(tName) {
-      var targetTab = clonedSs.getSheetByName(tName);
-      if (targetTab) clonedSs.deleteSheet(targetTab);
-    });
+    var sheets = currentSs.getSheets();
+
+    for (var s = 0; s < sheets.length; s++) {
+      var sheet = sheets[s];
+      var sheetName = sheet.getName();
     
+      if (internalMasterTabs.indexOf(sheetName) === -1) {
+        sheet.copyTo(clonedSs).setName(sheetName);
+      }
+    }
+
+    // Remove default "Sheet1" created automatically in new Google Sheets
+    var defaultSheet = clonedSs.getSheetByName("Sheet1");
+    if (defaultSheet && clonedSs.getSheets().length > 1) {
+      clonedSs.deleteSheet(defaultSheet);
+    }
+
+    // Add permissions to QC team
     var targetReviewers = ["praveendinker@google.com", "sameerranjan@google.com"];
     targetReviewers.forEach(function(email) {
       clonedFile.addEditor(email);
     });
-    
+  // -------------------------------------------------------------
+   
     var sheetUrl = clonedSs.getUrl();
     var htmlContent = 
       '<div style="font-family: \'Google Sans\', Roboto, Arial, sans-serif; padding: 15px; color: #3c4043;">' +
