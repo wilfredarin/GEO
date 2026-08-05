@@ -1,4 +1,4 @@
-/**
+**
  * ============================================================================
  * CUSTOM UI MENU INITIALIZATION
  * ============================================================================
@@ -19,8 +19,6 @@ function onOpen() {
  * Execution Context: Host Sheet ("POI Verification Control Hub")
  * ============================================================================
  */
-
-
 function runPhase1Ingestion() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
@@ -67,7 +65,9 @@ function runPhase1Ingestion() {
   
   // 3. Generate Local Verbatim Snapshot Copy
   var snapshotSheet = createOrClearTab(ss, "Mapfacts_Snapshot", mfHeaders);
-  snapshotSheet.getRange(2, 1, rawMapfacts.length - 1, mfHeaders.length).setValues(rawMapfacts.slice(1));
+  if (rawMapfacts.length > 1) {
+    snapshotSheet.getRange(2, 1, rawMapfacts.length - 1, mfHeaders.length).setValues(rawMapfacts.slice(1));
+  }
   
   // 4. Ingest Local Comparison Agent Output
   var comparisonSheet = ss.getSheetByName("Comparison_Agent_Output");
@@ -132,7 +132,7 @@ function runPhase1Ingestion() {
     
     // Gate 1: AI Hallucination Check
     if (!mapfactsCache[cFid]) {
-      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone,  cAiWebsite, "AI Hallucinated ID", 0, "Pending Review"]);
+      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone, cAiWebsite, "AI Hallucinated ID", 0, "Pending Review"]);
       continue;
     }
     
@@ -143,23 +143,23 @@ function runPhase1Ingestion() {
       duplicateRows.push([cFid, mfData.address, cAiAddress, mfData.website, cAiWebsite, mfData.nbr_cnt, "Duplicate"]);
       continue;
     }
-    // hours mfData.hours
+
     // Gate 3a: Empty AI Payload Data Verification (OR condition)
     if (!cAiAddress || !cAiPhone || !cAiWebsite || !cAiHours) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.hours, "Empty AI Payload", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, "Empty AI Payload", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 3b: Missing Coordinate Integrity Scan
     if (isNaN(cAiLat) || isNaN(cAiLng) || !cAiLat || !cAiLng) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone,mfData.hours, "Missing Coordinates", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, "Missing Coordinates", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 4: Geospatial Displacement Check
     var drift = calculateHaversine(mfData.lat, mfData.lng, cAiLat, cAiLng);
     if (!isNaN(drift) && drift > 1.0) {
-      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone,cAiWebsite, "Distance Drift > 1km", drift, "Pending Review"]);
+      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, "Distance Drift > 1km", drift, "Pending Review"]);
       continue;
     }
     
@@ -189,14 +189,14 @@ function runPhase1Ingestion() {
     var checkFid = rawMapfacts[k][mfMap["poi_fid"]];
     if (checkFid && !idsPresentInComparison[checkFid]) {
       var unassignedMf = mapfactsCache[checkFid];
-      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone,unassignedMf.hours, "Missing from Scraper Output", "Pending Review", "", ""]);
+      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone, unassignedMf.hours, "Missing from Scraper Output", "Pending Review", "", ""]);
     }
   }
   
   // 9. Render Destination Operations Tabs and Setup UI Component Controls
-  writeTriageTab(ss, "Left_Over", ["ID", "Address", "Website", "Phone","operating_hours", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 7, ["Found Website Link", "Duplicate", "Spam", "Can't Fix","Fixed Manual Tab","Pending Review"]);
+  writeTriageTab(ss, "Left_Over", ["ID", "Address", "Website", "Phone", "operating_hours", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 7, ["Found Website Link", "Duplicate", "Spam", "Can't Fix", "Fixed Manual Tab", "Pending Review"]);
   writeTriageTab(ss, "Human_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Phone", "AI_Phone", "AI_Website", "Validation_Failure_Reason", "Calculated_Drift_KM", "QC_Action"], humanReviewRows, 9, ["Pending Review", "Verified OK", "Fixed Manual Tab", "Spam", "Duplicate", "Can't Fix"]);
-  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "QC_Status"], duplicateRows, 7, ["Duplicate", "Not Duplicate", "Can't Decide","Pending Review"]);
+  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "QC_Status"], duplicateRows, 7, ["Duplicate", "Not Duplicate", "Can't Decide", "Pending Review"]);
   
   writeBugTab(ss, "Bugs_Address", ["ID", "AI_Website", "Address", "AI_Address", "raise_bug"], bugsAddress);
   writeBugTab(ss, "Bugs_Phone", ["ID", "AI_Website", "Address", "Mapfacts_Phone", "AI_Phone", "raise_bug"], bugsPhone);
@@ -204,7 +204,7 @@ function runPhase1Ingestion() {
   writeBugTab(ss, "Bugs_Website", ["ID", "AI_Website", "Address", "Mapfacts_Website", "raise_bug"], bugsWebsite);
   
   // 9b. Build the structural layout for Manual_Bug_Tab
-  var manualHeaders = ["ID","Address", "Website", "Phone","Operating_Hours", "AI_Address", "AI_Phone", "AI_Website", "AI_Operating_Hours", "Address_Result", "Phone_Result", "Website_Result", "Hours_Result"];
+  var manualHeaders = ["ID", "Address", "Website", "Phone", "Operating_Hours", "AI_Address", "AI_Phone", "AI_Website", "AI_Operating_Hours", "Address_Result", "Phone_Result", "Website_Result", "Hours_Result"];
   var manualSheet = createOrClearTab(ss, "Manual_Bug_Tab", manualHeaders);
   
   // Inject explicit dropdowns to the manual result logic columns (Rows 2 to 500)
@@ -215,22 +215,15 @@ function runPhase1Ingestion() {
 }
 
 
-
-
-
-
 /**
  * ============================================================================
  * EXPORT ENGINE: CLONE & SHARE WORKSPACE WITH QC TEAM
- * Creates an exact workspace duplicate, shares it with target stakeholders,
- * and renders an accessible visual interface component linking directly to it.
  * ============================================================================
  */
 function exportWorkspaceToQC() {
   var ui = SpreadsheetApp.getUi();
   var currentSs = SpreadsheetApp.getActiveSpreadsheet();
   
-  // 1. Prompt Confirmation to prevent accidental execution
   var confirm = ui.alert(
     "Export Confirmation", 
     "This will create a new, dedicated workspace clone for the QC Team and share it automatically. Do you want to proceed?", 
@@ -239,8 +232,6 @@ function exportWorkspaceToQC() {
   if (confirm !== ui.Button.YES) return;
 
   try {
-    // 2. Generate timestamped structural filename
-    var dateString = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd_HH-mm");
     var configSheet = currentSs.getSheetByName("Config");
     if (!configSheet) {
       SpreadsheetApp.getUi().alert("Error: A 'Config' tab must exist with external Mapfacts Sheet details.");
@@ -248,31 +239,31 @@ function exportWorkspaceToQC() {
     }
 
     var configValues = configSheet.getDataRange().getValues();
-    var tabName = configValues[1][1];
-    var clonedName = "CKB "+ tabName + " Bug File";
+    var tabName = "";
+    for (var r = 0; r < configValues.length; r++) {
+      var key = configValues[r][0] ? configValues[r][0].toString().toLowerCase().trim() : "";
+      if (key.indexOf("tab name") > -1) {
+        tabName = configValues[r][1];
+      }
+    }
     
-    // 3. Make an end-to-end exact file system copy of the Spreadsheet
+    var clonedName = "CKB " + (tabName || "Workspace") + " Bug File";
+    
     var currentFile = DriveApp.getFileById(currentSs.getId());
     var clonedFile = currentFile.makeCopy(clonedName);
     var clonedSs = SpreadsheetApp.openById(clonedFile.getId());
     
-    // 4. Clean up unnecessary Master data sheets from the QC Workspace if present
-    // Adjust these names if you want to keep or drop additional backend tabs
     var internalMasterTabs = ["Config", "Prompts"];
-    internalMasterTabs.forEach(function(tabName) {
-      var targetTab = clonedSs.getSheetByName(tabName);
-      if (targetTab) {
-        clonedSs.deleteSheet(targetTab);
-      }
+    internalMasterTabs.forEach(function(tName) {
+      var targetTab = clonedSs.getSheetByName(tName);
+      if (targetTab) clonedSs.deleteSheet(targetTab);
     });
     
-    // 5. Securely allocate access rights to target email addresses
     var targetReviewers = ["praveendinker@google.com", "sameerranjan@google.com"];
     targetReviewers.forEach(function(email) {
       clonedFile.addEditor(email);
     });
     
-    // 6. Generate an interactive HTML Dialog containing the deep link shortcut
     var sheetUrl = clonedSs.getUrl();
     var htmlContent = 
       '<div style="font-family: \'Google Sans\', Roboto, Arial, sans-serif; padding: 15px; color: #3c4043;">' +
@@ -282,23 +273,14 @@ function exportWorkspaceToQC() {
         '</p>' +
         '<div style="margin: 25px 0 15px 0; text-align: center;">' +
           '<a href="' + sheetUrl + '" target="_blank" style="' +
-            'background-color: #1a73e8; ' +
-            'color: white; ' +
-            'padding: 12px 24px; ' +
-            'text-decoration: none; ' +
-            'font-weight: 500; ' +
-            'font-size: 14px; ' +
-            'border-radius: 4px; ' +
-            'box-shadow: 0 1px 3px rgba(60,64,67,0.3); ' +
-            'display: inline-block;' +
+            'background-color: #1a73e8; color: white; padding: 12px 24px; ' +
+            'text-decoration: none; font-weight: 500; font-size: 14px; border-radius: 4px; ' +
+            'box-shadow: 0 1px 3px rgba(60,64,67,0.3); display: inline-block;' +
           '">Open QC Workspace</a>' +
         '</div>' +
       '</div>';
       
-    var htmlOutput = HtmlService.createHtmlOutput(htmlContent)
-        .setWidth(450)
-        .setHeight(200);
-        
+    var htmlOutput = HtmlService.createHtmlOutput(htmlContent).setWidth(450).setHeight(200);
     ui.showModalDialog(htmlOutput, "Deployment Engine Status");
     
   } catch (error) {
@@ -307,20 +289,15 @@ function exportWorkspaceToQC() {
 }
 
 
-
-
 /**
  * ============================================================================
- * PHASE 2: SHIPPING & RECONCILIATION ENGINE (UPDATED V5 - FIXED LOGIC)
- * Processes remote human feedback, evaluates systemic mismatches dynamically,
- * enforces optimized data schemas, and applies GDE review dropdowns.
+ * PHASE 2: SHIPPING & RECONCILIATION ENGINE
  * ============================================================================
  */
 function runPhase2Reconciliation() {
   var hostSs = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
   
-  // 1. Solicit Remote Sheet URL via Prompt
   var response = ui.prompt("Execute Phase 2 Shipping", "Provide the URL of the QC Team sheet workspace:", ui.ButtonSet.OK_CANCEL);
   if (response.getSelectedButton() !== ui.Button.OK) return;
   
@@ -338,7 +315,6 @@ function runPhase2Reconciliation() {
     return;
   }
   
-  // 2. Ingest Local Master Snapshots & Agent Matrices for dynamic mismatch evaluation
   var snapshotSheet = remoteSs.getSheetByName("Mapfacts_Snapshot");
   var comparisonSheet = remoteSs.getSheetByName("Comparison_Agent_Output");
   if (!snapshotSheet || !comparisonSheet) {
@@ -354,7 +330,6 @@ function runPhase2Reconciliation() {
   var compHeaders = rawComparison[0];
   var compMap = getHeaderMap(compHeaders);
   
-  // Build a constant-time lookup map for the original automated Comparison Agent findings
   var compAgentCache = {};
   for (var c = 1; c < rawComparison.length; c++) {
     var cRow = rawComparison[c];
@@ -373,7 +348,6 @@ function runPhase2Reconciliation() {
     }
   }
   
-  // 3. Fetch remote data matrices into memory
   var remoteLeftOver = getRemoteData(remoteSs, "Left_Over");
   var remoteHumanReview = getRemoteData(remoteSs, "Human_Review");
   var remoteDuplicateReview = getRemoteData(remoteSs, "Duplicate_Review");
@@ -384,13 +358,11 @@ function runPhase2Reconciliation() {
   var remoteBugsWebsite = getRemoteData(remoteSs, "Bugs_Website");
   var remoteManualBug = getRemoteData(remoteSs, "Manual_Bug_Tab");
   
-  // 4. Instantiate High-Performance Object Resolution Maps
   var processedIds = {};            
-  var processedHashes = {};         
+  var dropTracker = {}; // ID -> { sourceTab: string, reason: string }
   var finalSpamDuplicates = [];
   var reRunQueue = [];
   
-  // Target parameter allocation buffers
   var baseAddressOverrides = {};
   var basePhoneOverrides = {};
   var baseHoursOverrides = {};
@@ -403,7 +375,7 @@ function runPhase2Reconciliation() {
   // PIPELINE PROCESS BLOCK 1: DROPS & RE-RUN ROUTING
   // ==========================================
   
-  // Left_Over
+  // 1. Left_Over Tab
   if (remoteLeftOver && remoteLeftOver.length > 1) {
     var loMap = getHeaderMap(remoteLeftOver[0]);
     for (var l = 1; l < remoteLeftOver.length; l++) {
@@ -412,23 +384,17 @@ function runPhase2Reconciliation() {
       if (!loId) continue;
       var loAction = loRow[loMap["qc_action"]];
       
-      if (loAction === "Spam" || loAction === "Duplicate" ||
-      loAction === "Pending Review" || loAction === "Can't Fix") {
+      if (loAction === "Spam" || loAction === "Duplicate" || loAction === "Pending Review" || loAction === "Can't Fix") {
         processedIds[loId] = "dropped";
+        dropTracker[loId] = { sourceTab: "Left_Over", reason: loAction || "Unresolved" };
         if (loAction === "Spam" || loAction === "Duplicate") {
-          finalSpamDuplicates.push([loId, loRow[loMap["mapfacts_address"]], "Left_Over", loAction]);
+          finalSpamDuplicates.push([loId, loRow[loMap["address"]] || "", "Left_Over", loAction]);
         }
       }
-    //  removing this option of found wesbite link everything will be done manually 
-      //  else if (loAction === "Found Website Link" && loRow[loMap["qc_discovered_website"]]) {
-      //   var discoveredUrl = loRow[loMap["qc_discovered_website"]].toString().trim();
-      //   reRunQueue.push([loId, discoveredUrl, "website", discoveredUrl]);
-      //   processedIds[loId] = "rerun";
-      // }
     }
   }
   
-  // Duplicate Review
+  // 2. Duplicate Review Tab
   if (remoteDuplicateReview && remoteDuplicateReview.length > 1) {
     var dupMap = getHeaderMap(remoteDuplicateReview[0]);
     for (var d = 1; d < remoteDuplicateReview.length; d++) {
@@ -437,12 +403,11 @@ function runPhase2Reconciliation() {
       if (!dupId) continue;
       var dupStatus = dupRow[dupMap["qc_status"]];
       
-      // Duplicate_Review
-      if (dupStatus === "Duplicate" || dupStatus === "Spam" ||
-          dupStatus === "Pending Review" || dupStatus === "Can't Decide") {
+      if (dupStatus === "Duplicate" || dupStatus === "Spam" || dupStatus === "Pending Review" || dupStatus === "Can't Decide") {
         processedIds[dupId] = "dropped";
+        dropTracker[dupId] = { sourceTab: "Duplicate_Review", reason: dupStatus || "Unresolved" };
         if (dupStatus === "Duplicate" || dupStatus === "Spam") {
-          finalSpamDuplicates.push([dupId, dupRow[dupMap["mapfacts_address"]], "Duplicate_Review", dupStatus]);
+          finalSpamDuplicates.push([dupId, dupRow[dupMap["mapfacts_address"]] || "", "Duplicate_Review", dupStatus]);
         }
       } else if (dupStatus === "Not Duplicate") {
         processedIds[dupId] = "evaluate_mismatch";
@@ -450,7 +415,7 @@ function runPhase2Reconciliation() {
     }
   }
   
-  // Human Review
+  // 3. Human Review Tab
   if (remoteHumanReview && remoteHumanReview.length > 1) {
     var hrMap = getHeaderMap(remoteHumanReview[0]);
     for (var h = 1; h < remoteHumanReview.length; h++) {
@@ -459,18 +424,15 @@ function runPhase2Reconciliation() {
       if (!hrId || processedIds[hrId] === "dropped") continue;
       var hrAction = hrRow[hrMap["qc_action"]];
       
-      // Human_Review
-      if (hrAction === "Spam" || hrAction === "Duplicate" ||
-          hrAction === "Pending Review" || hrAction === "Can't Fix") {
+      if (hrAction === "Spam" || hrAction === "Duplicate" || hrAction === "Pending Review" || hrAction === "Can't Fix") {
         processedIds[hrId] = "dropped";
+        dropTracker[hrId] = { sourceTab: "Human_Review", reason: hrAction || "Unresolved" };
         if (hrAction === "Spam" || hrAction === "Duplicate") {
-          finalSpamDuplicates.push([hrId, hrRow[hrMap["mapfacts_address"]], "Human_Review", hrAction]);
+          finalSpamDuplicates.push([hrId, hrRow[hrMap["mapfacts_address"]] || "", "Human_Review", hrAction]);
         }
       } else if (hrAction === "Verified OK") {
         processedIds[hrId] = "evaluate_mismatch";
       }
-      
-      var fallbackAiWebsite = hrRow[hrMap["fixed_website"]] || "";
     }
   }
   
@@ -488,12 +450,10 @@ function runPhase2Reconciliation() {
       if (!bId || processedIds[bId] === "dropped" || processedIds[bId] === "rerun") continue;
       
       var isRaised = bRow[bMap["raise_bug"]];
-
       if (isRaised === true || isRaised === "TRUE" || isRaised === "true") {
         var targetValue = bRow[bMap[targetCol]] ? bRow[bMap[targetCol]].toString().trim() : "";
         if (targetValue !== "") {
           storageObj[bId] = targetValue;
-
           evidenceSourceTracker[bId] = bRow[bMap["ai_website"]] ? bRow[bMap["ai_website"]].toString().trim() : "";
           updateSourceTracker[bId] = updateSource;
         }
@@ -506,9 +466,7 @@ function runPhase2Reconciliation() {
   digestSparseBugTab(remoteBugsHours, "ai_operating_hours", baseHoursOverrides, "Automated_Scrape");
   digestSparseBugTab(remoteBugsWebsite, "ai_website", baseWebsiteOverrides, "Automated_Scrape");
   
-
-  
-  // CRITICAL RESOLUTION LOGIC STEP: Process the remaining active 'evaluate_mismatch' IDs against automated agent findings
+  // Harvest automated agent findings for active 'evaluate_mismatch' IDs
   for (var keyId in processedIds) {
     if (processedIds[keyId] === "evaluate_mismatch") {
       var agentRecord = compAgentCache[keyId];
@@ -516,7 +474,6 @@ function runPhase2Reconciliation() {
         evidenceSourceTracker[keyId] = agentRecord.ai_website || "NA";
         updateSourceTracker[keyId] = "Automated_Scrape_Resolved";
         
-        // Dynamically harvest structural changes from agent history if they are missing from override buffers
         if (agentRecord.res_address === "mismatch" && !baseAddressOverrides[keyId]) baseAddressOverrides[keyId] = agentRecord.ai_address;
         if (agentRecord.res_phone === "mismatch" && !basePhoneOverrides[keyId])     basePhoneOverrides[keyId] = agentRecord.ai_phone;
         if (agentRecord.res_website === "mismatch" && !baseWebsiteOverrides[keyId]) baseWebsiteOverrides[keyId] = agentRecord.ai_website;
@@ -525,7 +482,7 @@ function runPhase2Reconciliation() {
     }
   }
   
-    // Manual Bug Tab Processing
+  // Manual Bug Tab Processing
   if (remoteManualBug && remoteManualBug.length > 1) {
     var mbMap = getHeaderMap(remoteManualBug[0]);
     for (var m = 1; m < remoteManualBug.length; m++) {
@@ -542,31 +499,48 @@ function runPhase2Reconciliation() {
       var phonRes = mbRow[mbMap["phone_result"]] ? mbRow[mbMap["phone_result"]].toString().toLowerCase().trim() : "";
       var websRes = mbRow[mbMap["website_result"]] ? mbRow[mbMap["website_result"]].toString().toLowerCase().trim() : "";
       var hourRes = mbRow[mbMap["hours_result"]] ? mbRow[mbMap["hours_result"]].toString().toLowerCase().trim() : "";
-      // if (addrRes === "mismatch" && mbRow[mbMap["ai_address"]]) ui.alert("mismatch in human");
+      
       if (addrRes === "mismatch" && mbRow[mbMap["ai_address"]]) baseAddressOverrides[mbId] = mbRow[mbMap["ai_address"]].toString().trim();
       if (phonRes === "mismatch" && mbRow[mbMap["ai_phone"]])   basePhoneOverrides[mbId] = mbRow[mbMap["ai_phone"]].toString().trim();
       if (websRes === "mismatch" && mbRow[mbMap["ai_website"]]) baseWebsiteOverrides[mbId] = mbRow[mbMap["ai_website"]].toString().trim();
       if (hourRes === "mismatch" && mbRow[mbMap["ai_operating_hours"]]) baseHoursOverrides[mbId] = mbRow[mbMap["ai_operating_hours"]].toString().trim();
     }
   }
+
   // ==========================================
   // PIPELINE PROCESS BLOCK 3: ATOMIC DATA MATRIX COMPILATION
   // ==========================================
   
   var shipToGdeRows = [];
   var goldenDataRows = [];
+  var nonGoldenDataRows = [];
   
   for (var k = 1; k < rawSnapshot.length; k++) {
     var snapRow = rawSnapshot[k];
     var sId = snapRow[snapMap["poi_fid"]];
-    // if(processedIds[sId] === "dropped"){console.log(sId)}
-    if (!sId || processedIds[sId] === "dropped") continue;
-    
+    if (!sId) continue;
+
     var mfAddr = snapRow[snapMap["address"]] || "";
     var mfPhon = snapRow[snapMap["phone"]] || "";
     var mfWebs = snapRow[snapMap["website"]] || "";
     var mfHour = snapRow[snapMap["operating_hours"]] || "";
     
+    // ROUTE TO NON_GOLDEN_DATA IF DROPPED
+    if (processedIds[sId] === "dropped") {
+      var dMeta = dropTracker[sId] || { sourceTab: "Unassigned", reason: "Excluded" };
+      nonGoldenDataRows.push([
+        sId,
+        mfAddr,
+        mfPhon,
+        mfWebs,
+        mfHour,
+        dMeta.sourceTab,
+        dMeta.reason
+      ]);
+      continue;
+    }
+    
+    // ROUTE TO GOLDEN_DATA & SHIP_TO_GDE IF ACTIVE
     var hasAddrUpd = baseAddressOverrides.hasOwnProperty(sId);
     var hasPhonUpd = basePhoneOverrides.hasOwnProperty(sId);
     var hasWebsUpd = baseWebsiteOverrides.hasOwnProperty(sId);
@@ -577,7 +551,6 @@ function runPhase2Reconciliation() {
     var aiWebsVal = hasWebsUpd ? baseWebsiteOverrides[sId] : "";
     var aiHourVal = hasHourUpd ? baseHoursOverrides[sId] : "";
     
-    // 1. Compile modified records into custom ship_to_gde structural alignment rows
     if (hasAddrUpd || hasPhonUpd || hasWebsUpd || hasHourUpd) {
       shipToGdeRows.push([
         sId,
@@ -587,12 +560,10 @@ function runPhase2Reconciliation() {
         mfWebs,  aiWebsVal || "NA",
         mfHour,  aiHourVal || "NA",
         updateSourceTracker[sId] || "Automated_Scrape",
-        "","","",""
-    
+        "", "", "", "" // 4 GDE verdict columns (Total 15 columns)
       ]);
     }
     
-    // 2. Compile custom formatted Golden Data matrix tracking record
     goldenDataRows.push([
       sId,
       mfAddr,  aiAddrVal || mfAddr,
@@ -606,28 +577,32 @@ function runPhase2Reconciliation() {
   // PIPELINE PROCESS BLOCK 4: TARGET SHEET OUTPUT AND INJECTIONS
   // ==========================================
   
-  // Write ship_to_gde and inject custom dropdown controls down the final column boundary range
-  var gdeHeaders = ["id", "source_evidence", "mapfacts_address", "proposed_address", "mapfacts_phone", "proposed_phone", "mapfacts_website", "proposed_website", "mapfacts_operating_hours", "proposed_operating_hours", "update_source", "gde_verdict_phone_number_is_correct",  "gde_verdict_business_hours_is_correct",  "gde_verdict_website_is_correct", "gde_verdict_address_is_correct"];
+  var gdeHeaders = [
+    "id", "source_evidence", "mapfacts_address", "proposed_address", 
+    "mapfacts_phone", "proposed_phone", "mapfacts_website", "proposed_website", 
+    "mapfacts_operating_hours", "proposed_operating_hours", "update_source", 
+    "gde_verdict_phone_number_is_correct", "gde_verdict_business_hours_is_correct", 
+    "gde_verdict_website_is_correct", "gde_verdict_address_is_correct"
+  ];
   injectRemoteTab(remoteSs, "ship_to_gde", gdeHeaders, shipToGdeRows);
+  
   if (shipToGdeRows.length > 0) {
     var targetSheet = remoteSs.getSheetByName("ship_to_gde");
-    var dropdownRule = SpreadsheetApp.newDataValidation().requireValueInList(["Yes", "No","NA","Not Verified"]).setAllowInvalid(false).build();
-    targetSheet.getRange(2, gdeHeaders.length-3, shipToGdeRows.length, 4).setDataValidation(dropdownRule);
+    var dropdownRule = SpreadsheetApp.newDataValidation().requireValueInList(["Yes", "No", "NA", "Not Verified"]).setAllowInvalid(false).build();
+    targetSheet.getRange(2, gdeHeaders.length - 3, shipToGdeRows.length, 4).setDataValidation(dropdownRule);
   }
   
-  // Render Golden Data using explicit core schemas
   var goldenHeaders = ["poi_fid", "mapfacts_address", "ai_address", "mapfacts_phone", "ai_phone", "mapfacts_website", "ai_website", "mapfacts_operating_hours", "ai_operating_hours"];
   injectRemoteTab(remoteSs, "Golden_Data", goldenHeaders, goldenDataRows);
+
+  var nonGoldenHeaders = ["poi_fid", "mapfacts_address", "mapfacts_phone", "mapfacts_website", "mapfacts_operating_hours", "source_tab", "exclusion_reason"];
+  injectRemoteTab(remoteSs, "non_golden_data", nonGoldenHeaders, nonGoldenDataRows);
   
-  // Output diagnostic metrics tabs
   injectRemoteTab(remoteSs, "Final_Spam_Duplicates", ["id", "original_mapfacts_address", "source_tab", "classification"], finalSpamDuplicates);
   injectRemoteTab(remoteSs, "Re_Run_Agent", ["id", "ai_website", "target_attribute", "suggested_value"], reRunQueue);
   
-  ui.alert("Phase 2 Complete!\nOutput channels populated successfully inside the remote QC workspace.");
+  ui.alert("Phase 2 Complete!\nOutput channels populated successfully inside the remote QC workspace.\n\nSummary:\n- Golden Data: " + goldenDataRows.length + " POIs\n- Non-Golden Data: " + nonGoldenDataRows.length + " POIs");
 }
-
-
-
 
 
 /**
@@ -662,9 +637,10 @@ function isValidAiPhone(aiPhoneString) {
 
 function getHeaderMap(headers) {
   var map = {};
+  if (!headers) return map;
   for (var i = 0; i < headers.length; i++) {
-    var name = headers[i].toString().toLowerCase().trim();
-    map[name] = i;
+    var name = headers[i] ? headers[i].toString().toLowerCase().trim() : "";
+    if (name) map[name] = i;
   }
   return map;
 }
