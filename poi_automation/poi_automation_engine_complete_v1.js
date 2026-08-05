@@ -93,6 +93,10 @@ function runPhase1Ingestion() {
         lat: parseFloat(row[mfMap["lat"]]),
         lng: parseFloat(row[mfMap["lng"]]),
         nbr_cnt: parseInt(row[mfMap["nbr_count"]], 10) || 0,
+        is_claimed: row[mfMap["is_claimed"]] === "TRUE",
+        poi_bucket: row[mfMap["POI_BUCKET"]] || "",
+        failure_reasons: row[mfMap["failure_reasons"]] || "",
+        maps_link: row[mfMap["maps_link"]] || "",
         rawRow: row
       };
     }
@@ -140,32 +144,32 @@ function runPhase1Ingestion() {
     
     // Gate 2: Proximity Match Review
     if (mfData.nbr_cnt > 0) {
-      duplicateRows.push([cFid, mfData.address, cAiAddress, mfData.website, cAiWebsite, mfData.nbr_cnt, "Duplicate"]);
+      duplicateRows.push([cFid, mfData.address, cAiAddress, mfData.website, cAiWebsite, mfData.nbr_cnt,mfData.is_claimed,mfData.poi_bucket, mfData.failure_reasons, mfData.maps_link,"Pending Review"]);
       continue;
     }
 
     // Gate 3a: Empty AI Payload Data Verification (OR condition)
     if (!cAiAddress || !cAiPhone || !cAiWebsite || !cAiHours) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, "Empty AI Payload", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, mfData.is_claimed,mfData.poi_bucket, mfData.failure_reasons, mfData.maps_link,"Empty AI Payload", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 3b: Missing Coordinate Integrity Scan
     if (isNaN(cAiLat) || isNaN(cAiLng) || !cAiLat || !cAiLng) {
-      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, "Missing Coordinates", "Pending Review", "", ""]);
+      leftOverRows.push([cFid, mfData.address, mfData.website, mfData.phone, mfData.hours, mfData.is_claimed,mfData.poi_bucket, mfData.failure_reasons, mfData.maps_link,"Missing Coordinates", "Pending Review", "", ""]);
       continue;
     }
     
     // Gate 4: Geospatial Displacement Check
     var drift = calculateHaversine(mfData.lat, mfData.lng, cAiLat, cAiLng);
     if (!isNaN(drift) && drift > 1.0) {
-      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, "Distance Drift > 1km", drift, "Pending Review"]);
+      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, mfData.is_claimed, mfData.poi_bucket, mfData.failure_reasons, mfData.maps_link, "Distance Drift > 1km", drift, "Pending Review"]);
       continue;
     }
     
     // Gate 5: Proposed AI Phone Target Structure Validation
     if (cAiPhone && !isValidAiPhone(cAiPhone)) {
-      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, "Invalid Proposed AI Phone", drift || 0, "Pending Review"]);
+      humanReviewRows.push([cFid, mfData.address, cAiAddress, mfData.phone, cAiPhone, cAiWebsite, mfData.is_claimed, mfData.poi_bucket, mfData.failure_reasons, mfData.maps_link, "Invalid Proposed AI Phone", drift || 0, "Pending Review"]);
       continue;
     }
     
@@ -189,14 +193,14 @@ function runPhase1Ingestion() {
     var checkFid = rawMapfacts[k][mfMap["poi_fid"]];
     if (checkFid && !idsPresentInComparison[checkFid]) {
       var unassignedMf = mapfactsCache[checkFid];
-      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone, unassignedMf.hours, "Missing from Scraper Output", "Pending Review", "", ""]);
+      leftOverRows.push([checkFid, unassignedMf.address, unassignedMf.website, unassignedMf.phone, unassignedMf.hours, unassignedMf.is_claimed, unassignedMf.poi_bucket, unassignedMf.failure_reasons, unassignedMf.maps_link, "Missing from Scraper Output", "Pending Review", "", ""]);
     }
   }
   
   // 9. Render Destination Operations Tabs and Setup UI Component Controls
-  writeTriageTab(ss, "Left_Over", ["ID", "Address", "Website", "Phone", "operating_hours", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 7, ["Found Website Link", "Duplicate", "Spam", "Can't Fix", "Fixed Manual Tab", "Pending Review"]);
-  writeTriageTab(ss, "Human_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Phone", "AI_Phone", "AI_Website", "Validation_Failure_Reason", "Calculated_Drift_KM", "QC_Action"], humanReviewRows, 9, ["Pending Review", "Verified OK", "Fixed Manual Tab", "Spam", "Duplicate", "Can't Fix"]);
-  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "QC_Status"], duplicateRows, 7, ["Duplicate", "Not Duplicate", "Can't Decide", "Pending Review"]);
+  writeTriageTab(ss, "Left_Over", ["ID", "Address", "Website", "Phone", "operating_hours", "is_claimed", "poi_bucket", "failure_reasons", "maps_link", "Source_Status", "QC_Action", "QC_Discovered_Website", "Resolution_Notes"], leftOverRows, 11, ["Found Website Link", "Duplicate", "Spam", "Can't Fix", "Fixed Manual Tab", "Pending Review","Different Chain POI"]);
+  writeTriageTab(ss, "Human_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Phone", "AI_Phone", "AI_Website", "is_claimed", "poi_bucket", "failure_reasons", "maps_link", "Validation_Failure_Reason", "Calculated_Drift_KM", "QC_Action"], humanReviewRows, 13, ["Pending Review", "Verified OK", "Fixed Manual Tab", "Spam", "Duplicate", "Can't Fix","Different Chain POI"]);
+  writeTriageTab(ss, "Duplicate_Review", ["ID", "Mapfacts_Address", "AI_Address", "Mapfacts_Website", "AI_Website", "nbr_cnt", "is_claimed", "poi_bucket", "failure_reasons", "maps_link", "QC_Status"], duplicateRows, 11, ["Duplicate", "Not Duplicate", "Can't Decide", "Pending Review"]);
   
   writeBugTab(ss, "Bugs_Address", ["ID", "AI_Website", "Address", "AI_Address", "raise_bug"], bugsAddress);
   writeBugTab(ss, "Bugs_Phone", ["ID", "AI_Website", "Address", "Mapfacts_Phone", "AI_Phone", "raise_bug"], bugsPhone);
@@ -384,9 +388,9 @@ function runPhase2Reconciliation() {
       if (!loId) continue;
       var loAction = loRow[loMap["qc_action"]];
       
-      if (loAction === "Spam" || loAction === "Duplicate" || loAction === "Pending Review" || loAction === "Can't Fix") {
+      if (loAction === "Spam" || loAction === "Duplicate" || loAction === "Pending Review" || loAction === "Can't Fix" || loAction === "Different Chain POI") {
         processedIds[loId] = "dropped";
-        dropTracker[loId] = { sourceTab: "Left_Over", reason: loAction || "Unresolved" };
+        dropTracker[loId] = { sourceTab: "Left_Over", reason: loAction || "Unresolved",failure_reasons: loRow[loMap["failure_reasons"]] || "" };
         if (loAction === "Spam" || loAction === "Duplicate") {
           finalSpamDuplicates.push([loId, loRow[loMap["address"]] || "", "Left_Over", loAction]);
         }
@@ -405,7 +409,7 @@ function runPhase2Reconciliation() {
       
       if (dupStatus === "Duplicate" || dupStatus === "Spam" || dupStatus === "Pending Review" || dupStatus === "Can't Decide") {
         processedIds[dupId] = "dropped";
-        dropTracker[dupId] = { sourceTab: "Duplicate_Review", reason: dupStatus || "Unresolved" };
+        dropTracker[dupId] = { sourceTab: "Duplicate_Review", reason: dupStatus || "Unresolved",failure_reasons: dupRow[dupMap["failure_reasons"]] || "" };
         if (dupStatus === "Duplicate" || dupStatus === "Spam") {
           finalSpamDuplicates.push([dupId, dupRow[dupMap["mapfacts_address"]] || "", "Duplicate_Review", dupStatus]);
         }
@@ -424,9 +428,9 @@ function runPhase2Reconciliation() {
       if (!hrId || processedIds[hrId] === "dropped") continue;
       var hrAction = hrRow[hrMap["qc_action"]];
       
-      if (hrAction === "Spam" || hrAction === "Duplicate" || hrAction === "Pending Review" || hrAction === "Can't Fix") {
+      if (hrAction === "Spam" || hrAction === "Duplicate" || hrAction === "Pending Review" || hrAction === "Can't Fix" || hrAction === "Different Chain POI") {
         processedIds[hrId] = "dropped";
-        dropTracker[hrId] = { sourceTab: "Human_Review", reason: hrAction || "Unresolved" };
+        dropTracker[hrId] = { sourceTab: "Human_Review", reason: hrAction || "Unresolved",failure_reasons: hrRow[hrMap["failure_reasons"]] || "" };
         if (hrAction === "Spam" || hrAction === "Duplicate") {
           finalSpamDuplicates.push([hrId, hrRow[hrMap["mapfacts_address"]] || "", "Human_Review", hrAction]);
         }
@@ -527,7 +531,7 @@ function runPhase2Reconciliation() {
     
     // ROUTE TO NON_GOLDEN_DATA IF DROPPED
     if (processedIds[sId] === "dropped") {
-      var dMeta = dropTracker[sId] || { sourceTab: "Unassigned", reason: "Excluded" };
+      var dMeta = dropTracker[sId] || { sourceTab: "Unassigned", reason: "Excluded",failure_reasons: "" };
       nonGoldenDataRows.push([
         sId,
         mfAddr,
@@ -535,7 +539,8 @@ function runPhase2Reconciliation() {
         mfWebs,
         mfHour,
         dMeta.sourceTab,
-        dMeta.reason
+        dMeta.reason,
+        dMeta.failure_reasons
       ]);
       continue;
     }
@@ -595,7 +600,7 @@ function runPhase2Reconciliation() {
   var goldenHeaders = ["poi_fid", "mapfacts_address", "ai_address", "mapfacts_phone", "ai_phone", "mapfacts_website", "ai_website", "mapfacts_operating_hours", "ai_operating_hours"];
   injectRemoteTab(remoteSs, "Golden_Data", goldenHeaders, goldenDataRows);
 
-  var nonGoldenHeaders = ["poi_fid", "mapfacts_address", "mapfacts_phone", "mapfacts_website", "mapfacts_operating_hours", "source_tab", "exclusion_reason"];
+  var nonGoldenHeaders = ["poi_fid", "mapfacts_address", "mapfacts_phone", "mapfacts_website", "mapfacts_operating_hours", "source_tab", "exclusion_reason", "failure_reasons"];
   injectRemoteTab(remoteSs, "non_golden_data", nonGoldenHeaders, nonGoldenDataRows);
   
   injectRemoteTab(remoteSs, "Final_Spam_Duplicates", ["id", "original_mapfacts_address", "source_tab", "classification"], finalSpamDuplicates);
