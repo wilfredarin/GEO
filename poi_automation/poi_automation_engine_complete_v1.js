@@ -136,7 +136,7 @@ function runPhase1Ingestion() {
     
     // Gate 1: AI Hallucination Check
     if (!mapfactsCache[cFid]) {
-      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone, cAiWebsite, "AI Hallucinated ID", 0,"","","","", "Pending Review"]);
+      humanReviewRows.push([cFid, "", cAiAddress, "", cAiPhone, cAiWebsite, "AI Hallucinated ID", "","","","", 0,"Pending Review"]);
       continue;
     }
     
@@ -552,7 +552,9 @@ function runPhase2Reconciliation() {
     var mfPhon = snapRow[snapMap["phone"]] || "";
     var mfWebs = snapRow[snapMap["website"]] || "";
     var mfHour = snapRow[snapMap["operating_hours"]] || "";
-    
+    var mfIsClaimed = snapRow[snapMap["is_claimed"]] || "";
+    var mfIsChainCorrect = snapRow[snapMap["is_chain_correct"]] || "";
+    var mfChainName = snapRow[snapMap["chain_name"]] || "";
     // ROUTE TO NON_GOLDEN_DATA IF DROPPED
     if (processedIds[sId] === "dropped") {
       var dMeta = dropTracker[sId] || { sourceTab: "Unassigned", reason: "Excluded",failure_reasons: "" };
@@ -598,7 +600,10 @@ function runPhase2Reconciliation() {
       mfAddr,  aiAddrVal || mfAddr,
       mfPhon,  aiPhonVal || mfPhon,
       mfWebs,  aiWebsVal || mfWebs,
-      mfHour,  aiHourVal || mfHour
+      mfHour,  aiHourVal || mfHour,
+      mfIsClaimed,
+      mfIsChainCorrect, 
+      mfChainName
     ]);
   }
   
@@ -621,7 +626,7 @@ function runPhase2Reconciliation() {
     targetSheet.getRange(2, gdeHeaders.length - 3, shipToGdeRows.length, 4).setDataValidation(dropdownRule);
   }
   
-  var goldenHeaders = ["poi_fid", "mapfacts_address", "ai_address", "mapfacts_phone", "ai_phone", "mapfacts_website", "ai_website", "mapfacts_operating_hours", "ai_operating_hours"];
+  var goldenHeaders = ["poi_fid", "mapfacts_address", "ai_address", "mapfacts_phone", "ai_phone", "mapfacts_website", "ai_website", "mapfacts_operating_hours", "ai_operating_hours", "is_claimed", "is_chain_correct", "chain_name"];
   injectRemoteTab(remoteSs, "Golden_Data", goldenHeaders, goldenDataRows);
 
   var nonGoldenHeaders = ["poi_fid", "mapfacts_address", "mapfacts_phone", "mapfacts_website", "mapfacts_operating_hours", "source_tab", "exclusion_reason", "failure_reasons"];
