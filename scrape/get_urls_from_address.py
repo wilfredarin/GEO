@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import urllib.parse
 import pandas as pd
@@ -14,8 +15,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 # CONFIGURATION
 # ==========================================
 # Look for input and output inside the ../Data/ directory
-INPUT_FILE_PATH = os.path.join("..", "Data", "input_stores.xlsx")
-OUTPUT_FILE_PATH = os.path.join("..", "Data", "output.csv")
+INPUT_FILE_PATH = os.path.join("..", "DATA", "input_stores_map.xlsx")
+OUTPUT_FILE_PATH = os.path.join("..", "DATA", "output_stores_map.csv")
 
 # Column names in your input Excel file
 COL_STORE_CODE = "store_code"
@@ -205,9 +206,10 @@ def main():
       )
 
       poi_url = extract_maps_url(driver, address, keyword)
-
+      pattern = r'0x[0-9a-fA-F]+0x:[0-9a-fA-F]+'
+      featureids = re.findall(pattern, poi_url)
       # Append result row to output DataFrame
-      new_row = pd.DataFrame([{"store_code": store_code, "url": poi_url}])
+      new_row = pd.DataFrame([{"store_code": store_code, "url": poi_url, "featureids": featureids}])
       output_df = pd.concat([output_df, new_row], ignore_index=True)
 
       print(f"  -> Extracted URL: {poi_url}")

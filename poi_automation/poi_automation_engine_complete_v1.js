@@ -50,11 +50,13 @@ function runPhase1Ingestion() {
   }
   
   // 2. Remote Fetch External Mapfacts Data
-  var externalSourceSs, remoteSheet, rawMapfacts;
+  var externalSourceSs, remoteSheetMf,remoteSheetAI, rawMapfacts, rawAI;
   try {
     externalSourceSs = SpreadsheetApp.openByUrl(externalUrl);
-    remoteSheet = externalSourceSs.getSheetByName(externalTabName);
-    rawMapfacts = remoteSheet.getDataRange().getValues();
+    remoteSheetMf = externalSourceSs.getSheetByName("mapfacts");
+    remoteSheetAI = externalSourceSs.getSheetByName("AI");
+    rawMapfacts = remoteSheetMf.getDataRange().getValues();
+    rawAI = remoteSheetAI.getDataRange().getValues();
   } catch(e) {
     SpreadsheetApp.getUi().alert("Remote Connection Failed: Check URL permissions and Tab name.\nDetails: " + e.message);
     return;
@@ -67,6 +69,14 @@ function runPhase1Ingestion() {
   var snapshotSheet = createOrClearTab(ss, "Mapfacts_Snapshot", mfHeaders);
   if (rawMapfacts.length > 1) {
     snapshotSheet.getRange(2, 1, rawMapfacts.length - 1, mfHeaders.length).setValues(rawMapfacts.slice(1));
+  }
+  
+  //3.1. Generate Local Verbatim AI Copy
+  var aiHeaders = rawAI[0];
+  var aiMap = getHeaderMap(aiHeaders);
+  var aiSnapshotSheet = createOrClearTab(ss, "AI_Snapshot", aiHeaders);
+  if (rawAI.length > 1) {
+    aiSnapshotSheet.getRange(2, 1, rawAI.length - 1, aiHeaders.length).setValues(rawAI.slice(1));
   }
   
   // 4. Ingest Local Comparison Agent Output
